@@ -54,3 +54,4 @@ HotPot QA: https://huggingface.co/datasets/hotpotqa/hotpot_qa
 1）对于query请求的响应时间（retrieval时间，generation时间）
 2）添加隐私算法之后的响应时间（retrieval+PoR时间，generation+PoG时间）
 3）PoR, PoG proof size
+4）变换embedding向量长度之后的影响
