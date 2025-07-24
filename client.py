@@ -1,5 +1,5 @@
 import os
-from langchain.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader
 from typing import List, Tuple, Dict, Any
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
@@ -58,8 +58,6 @@ class Client:
         # )
         self.embeddings = LlamaCppEmbeddings(model_path=model_path)
         self.db: FAISS = None
-        self.retriever = None
-        self.load_vectorstore()
 
     def _chunk_text(self, text: str, chunk_size=800, overlap= 200) -> list[str]:
         """
@@ -68,6 +66,7 @@ class Client:
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=overlap,
+            separators=["\n\n", "\n", "。", ".", "！", "？", "!", "?", " ", ""],
             length_function=len
         )
         return splitter.split_text(text)
@@ -107,7 +106,6 @@ class Client:
             title = item.get('title', '')
             if not text:
                 continue
-            # # 抽取前 5000 字，避免过长
             # snippet = text[:5000]
             meta = {'source': f'wikipedia://{language}/{item.get("id")}'}
             docs.append(Document(page_content=f"{title}\n{text}", metadata=meta))
@@ -144,7 +142,7 @@ class Client:
                 # 每 batch_size 保存一次，防止内存溢出
                 if len(texts) >= batch_size or j == len(chunks) - 1:
                     if self.db is None:
-                        self.db = FAISS.from_texts(texts, embedding=self.embeddings, metadatas=metadatas)
+                        self.db = FAISS.from_texts(texts, embedding=self.embeddings, metadatas=metadatas, normalize_L2=True)
                     else:
                         self.db.add_texts(texts, metadatas=metadatas)
                     texts.clear()
@@ -160,7 +158,7 @@ class Client:
 
     def load_vectorstore(self) -> None:
         """
-        加载已保存的向量存储，并初始化检索器。
+        加载已保存的向量存储
         """
         if not os.path.exists(self.vectorstore_path):
             raise FileNotFoundError(f"Vectorstore directory '{self.vectorstore_path}' not found.")
@@ -180,26 +178,64 @@ class Client:
         if self.db is None:
             raise ValueError("Vectorstore尚未加载，请先调用load_vectorstore或build_vectorstore")
 
+        # 查询向量并归一化
         query_vec = np.array(self.embeddings.embed_query(query), dtype=np.float32)
-        query_vec.tolist()
+        query_norm = query_vec / np.linalg.norm(query_vec)
+
+        # 使用 FAISS 内积搜索（等价于余弦相似度）
+        scores, indices = self.db.index.search(query_norm.reshape(1, -1), top_k)
+
+        results = []
+        for i, idx in enumerate(indices[0]):
+            if idx == -1:
+                continue
+            doc_id = self.db.index_to_docstore_id[idx]
+            doc = self.db.docstore.search(doc_id)
+
+            faiss_index = int(idx)
+            vec = self.db.index.reconstruct(faiss_index).tolist()
+            score = float(scores[0][i])  # 余弦相似度
+            results.append(Proof(doc, vec, score))
         
-        # 执行MMR搜索
-        # if use_mmr: 
-        #     docs = self.db.max_marginal_relevance_search(query, k=top_k, fetch_k=top_k * 2)
-        #     doc_texts = [doc.page_content for doc in docs]
-        #     doc_vecs = np.array(self.embeddings.embed_documents(doc_texts), dtype=np.float32)
-        # else:
-
-        # 执行相似度搜索
-        docs_and_scores = self.db.similarity_search_with_score(query, k=top_k)
-        docs, scores = zip(*docs_and_scores)
-        docs = list(docs)
-        scores = list(scores)
-        doc_texts = [doc.page_content for doc in docs]
-        doc_vecs = self.embeddings.embed_documents(doc_texts)
-
-        # 打包结果为列表 [(doc, vec, score)]
-        results = [Proof(doc, vec, score) for doc, vec, score in zip(docs, doc_vecs, scores)]
-
         return results, query_vec
+        # # 获取查询向量
+        # query_vec = self.embeddings.embed_query(query)
+        # query_vec = np.array(query_vec, dtype=np.float32)
+        
+        # # 使用FAISS索引进行搜索，获取L2距离和索引
+        # distances, indices = self.db.index.search(np.array([query_vec], dtype=np.float32), top_k)
 
+        # results = []
+        # for i in range(top_k):
+        #     index = indices[0][i]
+        #     distance = distances[0][i]  # L2距离平方：||u - v||^2
+        #     print(f"Index: {index}, Distance: {distance}")
+
+        #     docstore_id = self.db.index_to_docstore_id[index]
+        #     doc = self.db.docstore.search(docstore_id)
+
+        #     faiss_index = int(index)
+        #     vec = self.db.index.reconstruct(faiss_index)  # 重建文档向量
+        #     vec = np.array(vec, dtype=np.float32)
+        #     print(f"Document: {doc}, Vector: {vec}")
+
+        #     # 计算向量范数
+        #     query_norm = np.linalg.norm(query_vec)
+        #     vec_norm = np.linalg.norm(vec)
+
+        #     # 从L2距离计算内积：<u,v> = (||u||^2 + ||v||^2 - ||u - v||^2) / 2
+        #     inner_product = (query_norm**2 + vec_norm**2 - distance) / 2
+
+        #     # 计算余弦相似度
+        #     cos_sim = inner_product / (query_norm * vec_norm) if query_norm * vec_norm != 0 else 0
+
+        #     # 打包结果
+        #     results.append(Proof(doc, vec.tolist(), cos_sim))
+        # return results, query_vec
+
+if __name__ == "__main__":
+    # 示例：创建Client并加载向量存储
+    client = Client(model_path="./models/Qwen3-Embedding/Qwen3-Embedding-0.6B-Q8_0.gguf", vectorstore_path="faiss_db")
+    client.build_vectorstore(sample_size=100, batch_size=10, streaming=True)
+    print("Client initialized and vectorstore built.")
+    client.loud_vectorstore()
