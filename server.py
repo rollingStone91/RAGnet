@@ -1,9 +1,7 @@
-import os
 from typing import List, Tuple, Dict
-import numpy as np
 from langchain.chat_models import ChatOllama
 from langchain.schema import Document
-from client import Client
+
 
 class Server:
     """

@@ -7,10 +7,9 @@ from langchain_community.vectorstores import FAISS
 from langchain.tools.retriever import create_retriever_tool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain_community.embeddings import DashScopeEmbeddings
-from langchain_community.chat_models import ChatOllama
-from langchain.chains import RetrievalQA
 from datasets import load_dataset
 from langchain.schema import Document
+from langchain_experimental.text_splitter import SemanticChunker
 import numpy as np
 import json
 import faiss
@@ -70,19 +69,36 @@ class Client:
             length_function=len
         )
         return splitter.split_text(text)
+    
+    def _semantic_chunk_docs(self, docs: list[Document],
+                             buffer_size=3,
+                             breakpoint_threshold_type="percentile",
+                             sentence_split_regex=r"(?<=[.?!])\s+") -> list[Document]:
+        """
+        使用语义分块器对文档进行分块处理。
+        """
+        splitter = SemanticChunker(
+            embeddings=self.embeddings,
+            buffer_size=buffer_size,
+            breakpoint_threshold_type=breakpoint_threshold_type,
+            sentence_split_regex=sentence_split_regex
+        )
+        return splitter.split_documents(docs)
 
     # 读取PDF文件并提取文本内容
     def _read_pdfs(self, pdf_paths: List[str]) -> List[Document]:
         docs = []
-        for path in pdf_paths:
+        for i, path in enumerate(pages):
             loader = PyPDFLoader(path)
             pages = loader.load_and_split()
-            docs.extend(pages)
+            for page in pages:
+                docs.append(Document(page_content=page.page_content, metadata={'source': path, 'doc_id': i}))
         return docs
 
     # 读取JSON文件夹中的所有文件
     def _load_json_folder(self, folder_path: str) -> List[Document]:
         docs = []
+        i = 0
         for filename in os.listdir(folder_path):
             if not filename.endswith('.json'):
                 continue
@@ -91,7 +107,8 @@ class Client:
                 data = json.load(f)
             content = f"{data.get('title', '')}\n{data.get('content', '')}".strip()
             if content:
-                docs.append(Document(page_content=content, metadata={'source': filepath}))
+                docs.append(Document(page_content=content, metadata={'source': filepath, 'doc_id': i}))
+                i+=1
         return docs
     
     # 在线读取数据集
@@ -107,13 +124,14 @@ class Client:
             if not text:
                 continue
             # snippet = text[:5000]
-            meta = {'source': f'wikipedia://{language}/{item.get("id")}'}
+            meta = {'source': f'wikipedia://{language}/{item.get("id")}', 'doc_id': i}
             docs.append(Document(page_content=f"{title}\n{text}", metadata=meta))
         print(f"Streamed {len(docs)} Wikipedia docs.")
         return docs
     
     def build_vectorstore(self, sample_size=100, batch_size=10, 
-                          streaming=False, folder_path=None, pdf_paths:List[str]=None):
+                          streaming=False, folder_path=None, pdf_paths:List[str]=None,
+                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+"):
         docs = []
         if streaming:
             # 在线读取数据集
@@ -125,29 +143,27 @@ class Client:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
 
+        # 使用 SemanticChunker 分块
+        chunks = self._semantic_chunk_docs(docs, buffer_size, threshold_type, sentence_split_regex)
+        print(f"Total chunks after semantic split: {len(chunks)}")
+
+        # 构建 FAISS
         texts, metadatas = [], []
-        faiss_id = 0
-        # 分块并批量处理
-        for i, doc in enumerate(docs):
-            chunks = self._chunk_text(doc.page_content)
-            for j, chunk in enumerate(chunks):
-                texts.append(chunk)
-                metadatas.append({
+        for i, doc in enumerate(chunks):
+            texts.append(doc.page_content)
+            metadatas.append({
                 "source": doc.metadata.get("source", ""),
-                "doc_id": i,
-                "chunk_id": j,
-                "faiss_id": faiss_id
+                "doc_id": doc.metadata.get("doc_id", ""),
+                "faiss_id": i
             })
-                faiss_id += 1
-                # 每 batch_size 保存一次，防止内存溢出
-                if len(texts) >= batch_size or j == len(chunks) - 1:
-                    if self.db is None:
-                        self.db = FAISS.from_texts(texts, embedding=self.embeddings, metadatas=metadatas, normalize_L2=True)
-                    else:
-                        self.db.add_texts(texts, metadatas=metadatas)
-                    texts.clear()
-                    metadatas.clear()
-            print(f"Processed {i+1}/{len(docs)} articles...")
+            if len(texts) >= batch_size or i == len(chunks) - 1:
+                if self.db is None:
+                    self.db = FAISS.from_texts(texts, embedding=self.embeddings, metadatas=metadatas, normalize_L2=True)
+                else:
+                    self.db.add_texts(texts, metadatas=metadatas)
+                texts.clear()
+                metadatas.clear()
+                print(f"Inserted batch up to chunk {i+1}/{len(chunks)}")
 
         # 保存向量库
         if self.db:
@@ -197,45 +213,14 @@ class Client:
             score = float(scores[0][i])  # 余弦相似度
             results.append(Proof(doc, vec, score))
         
-        return results, query_vec
-        # # 获取查询向量
-        # query_vec = self.embeddings.embed_query(query)
-        # query_vec = np.array(query_vec, dtype=np.float32)
-        
-        # # 使用FAISS索引进行搜索，获取L2距离和索引
-        # distances, indices = self.db.index.search(np.array([query_vec], dtype=np.float32), top_k)
-
-        # results = []
-        # for i in range(top_k):
-        #     index = indices[0][i]
-        #     distance = distances[0][i]  # L2距离平方：||u - v||^2
-        #     print(f"Index: {index}, Distance: {distance}")
-
-        #     docstore_id = self.db.index_to_docstore_id[index]
-        #     doc = self.db.docstore.search(docstore_id)
-
-        #     faiss_index = int(index)
-        #     vec = self.db.index.reconstruct(faiss_index)  # 重建文档向量
-        #     vec = np.array(vec, dtype=np.float32)
-        #     print(f"Document: {doc}, Vector: {vec}")
-
-        #     # 计算向量范数
-        #     query_norm = np.linalg.norm(query_vec)
-        #     vec_norm = np.linalg.norm(vec)
-
-        #     # 从L2距离计算内积：<u,v> = (||u||^2 + ||v||^2 - ||u - v||^2) / 2
-        #     inner_product = (query_norm**2 + vec_norm**2 - distance) / 2
-
-        #     # 计算余弦相似度
-        #     cos_sim = inner_product / (query_norm * vec_norm) if query_norm * vec_norm != 0 else 0
-
-        #     # 打包结果
-        #     results.append(Proof(doc, vec.tolist(), cos_sim))
-        # return results, query_vec
+        return results, query_norm.tolist()
 
 if __name__ == "__main__":
     # 示例：创建Client并加载向量存储
-    client = Client(model_path="./models/Qwen3-Embedding/Qwen3-Embedding-0.6B-Q8_0.gguf", vectorstore_path="faiss_db")
-    client.build_vectorstore(sample_size=100, batch_size=10, streaming=True)
-    print("Client initialized and vectorstore built.")
-    client.loud_vectorstore()
+    clients = [Client(vectorstore_path="./common_sense_db"), Client(vectorstore_path="./computer_science_coding_related_db"),
+               Client(vectorstore_path="./law_related_db"), Client(vectorstore_path="./medicine_related_db")]
+    folder_paths = ["./classified_dataset/common_sense", "./classified_dataset/computer_science_coding_related",
+             "./classified_dataset/law_related", "./classified_dataset/medicine_related"]
+    for c, f in zip(clients, folder_paths):
+        print(f"Building vectorstore for {f}...")
+        c.build_vectorstore(folder_path=f)

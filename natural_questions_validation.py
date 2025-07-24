@@ -1,45 +1,29 @@
-from datasets import load_dataset
 from evaluate import load
 import time
 import pandas as pd
 from client import Client
 from server import Server
 
-# 数据集加载（streaming 模式 + 采样）
-def load_sampled_dataset(name, config=None, split="validation", sample_size=100):
-    try:
-        ds = load_dataset(name, config, split=split, streaming=True)
-    except Exception:
-        # 如果 validation split 不存在，用 test
-        ds = load_dataset(name, config, split="test", streaming=True)
-    
-    sampled = []
-    for i, example in enumerate(ds):
-        if i >= sample_size:
-            break
-        sampled.append(example)
-    return sampled
+from validation_tools import load_sampled_dataset
 
-ds = load_dataset("google-research-datasets/natural_questions",
-                      split="validation", streaming=True)
+# datasets = {
+#     "natural_questions": load_sampled_dataset("google-research-datasets/natural_questions", split="validation", sample_size=100),
+#     "trivia_qa": load_sampled_dataset("mandarjoshi/trivia_qa", "unfiltered", split="validation", sample_size=100),
+#     "squad": load_sampled_dataset("rajpurkar/squad", split="validation", sample_size=100),
+#     "web_questions": load_sampled_dataset("stanfordnlp/web_questions", split="test", sample_size=100),
+#     "mmlu": load_sampled_dataset("cais/mmlu", "all", split="validation", sample_size=100),
+#     "strategy_qa": load_sampled_dataset("wics/strategy-qa", split="validation", sample_size=100),
+#     "hotpot_qa": load_sampled_dataset("hotpot_qa", split="validation", sample_size=100)  # 移除 fullwiki
+# }
+
+samples = load_sampled_dataset("google-research-datasets/natural_questions",
+                      split="validation")
 
 # 加载指标
 metric_qa = load("squad")
 
-def evaluate_natural_questions( 
-        ds,
-        clients: list[Client],
-        llm_server: Server,
-        sample_limit=100,
-        top_k=5,
-        output_csv: str = "natural_questions_results.csv"): 
-    samples = []
-    for i, ex in enumerate(ds):
-        if i >= sample_limit:
-            break
-        samples.append(ex)
-    print(f"Loaded {len(samples)} Natural Questions samples.")
-
+def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5,
+                                output_csv: str = "natural_questions_results.csv"): 
     results = []
     for idx, sample in enumerate(samples):
         question = sample["question"]["text"]
@@ -63,7 +47,7 @@ def evaluate_natural_questions(
         contexts = [r.document.page_content for r in all_proofs[:top_k]]
 
         # 调用 LLM Server
-        answer = llm_server.generate_answer(question, contexts)
+        answer = server.generate_answer(question, contexts)
         latency = time.time() - start_time
 
         # 构造 SQuAD 格式输入
@@ -100,5 +84,5 @@ if __name__ == "__main__":
                Client(vectorstore_path="./law_related_db"), Client(vectorstore_path="./medicine_related_db")]
     for c in clients:
         c.load_vectorstore()
-    llm_server = Server(model_name="qwen3:4b")
-    evaluate_natural_questions(ds, clients, llm_server, sample_limit=100, top_k=5, output_csv="natural_questions_results.csv")
+    server = Server(model_name="qwen3:4b")
+    evaluate_natural_questions(clients, server, top_k=5, output_csv="natural_questions_results.csv")
