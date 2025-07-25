@@ -1,9 +1,7 @@
 from datasets import load_dataset
 import re
 
-# -----------------------
 # 工具函数
-# -----------------------
 
 # 数据集加载（streaming 模式 + 采样）
 def load_sampled_dataset(name, config=None, split="validation", sample_size=100):
@@ -21,22 +19,13 @@ def load_sampled_dataset(name, config=None, split="validation", sample_size=100)
     print(f"Loaded {len(sampled)} samples from {name} ({split})")
     return sampled
 
-def clean_answer(raw: str) -> str:
-    """
-    去除 <think> 标签和其中的内容，并去掉多余空白
-    """
-    # 去掉所有 <think>…</think> 区段
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-    # 去掉多余的换行和空格
-    return cleaned.strip()
-
-def normalize_text(s: str) -> str:
+def normalize_text(s: str):
     """小写，去标点，去多余空格"""
     s = s.lower()
     s = re.sub(r"[^a-z0-9\s]", "", s)
     return " ".join(s.split())
 
-def compute_prf1(pred: str, golds: list[str]) -> tuple[float,float,float]:
+def compute_prf(pred: str, golds: list[str]):
     """
     对每个 gold answer 计算 token 级别的 P/R/F1，返回最高的那组值
     """
@@ -56,3 +45,99 @@ def compute_prf1(pred: str, golds: list[str]) -> tuple[float,float,float]:
         best_f1 = max(best_f1, f1)
 
     return best_p, best_r, best_f1
+
+def get_natural_questions(sample):
+    '''
+    从 Natural Questions 数据集中提取问题和答案。
+    '''
+    question = sample["question"]["text"]
+    print(f"Processing question: {question}")
+    gold_answers = sample.get("answers", {}).get("text", [])
+    print(f"Gold answers: {gold_answers}")
+    if not gold_answers:
+        gold_answers = [""]  # 占位
+    return question, gold_answers
+
+def get_trivia_qa(sample):
+    '''
+    从 Trivia QA 数据集中提取问题和答案。
+    '''
+    if "question" in sample:
+        question = sample["question"]
+    elif "query" in sample:
+        question = sample["query"]
+    else:
+        raise KeyError("无法在样本中找到 question 字段")
+    print(f"Processing question: {question}")
+
+    # answer 可能是字符串，也可能是list
+    if "answer" in sample:
+        gold_answers = sample["answer"].get('aliases', [])
+    elif "answers" in sample:
+        gold_answers = sample["answers"].get('aliases', [])
+    else:
+        gold_answers = []
+    print(f"Gold answers: {gold_answers}")
+    return question, gold_answers
+
+def get_squad(sample):
+    '''
+    从 SQuAD 数据集中提取问题和答案。
+    '''
+    if "question" in sample:
+        question = sample["question"]
+    else:
+        raise KeyError("无法在样本中找到 question 字段")
+    print(f"Processing question: {question}")
+
+    if "answer" in sample:
+        gold_answers = sample["answer"].get('text', [])
+    elif "answers" in sample:
+        gold_answers = sample["answers"].get('text', [])
+    else:
+        gold_answers = []
+    print(f"Gold answers: {gold_answers}")
+    return question, gold_answers
+
+def get_web_questions(sample):
+    '''
+    从 Web Questions 数据集中提取问题和答案。
+    '''
+    if "question" in sample:
+        question = sample["question"]
+    else:
+        raise KeyError("无法在样本中找到 question 字段")
+    print(f"Processing question: {question}")
+
+    if "answer" in sample:
+        gold_answers = sample["answer"]
+    elif "answers" in sample:
+        gold_answers = sample["answers"]
+    else:
+        gold_answers = []
+    print(f"Gold answers: {gold_answers}")
+    return question, gold_answers
+
+def get_mmlu(sample):
+    ''' 
+    从 MMLU 数据集中提取问题和答案。
+    '''
+    if "question" in sample:
+        question = sample["question"]
+    else:
+        raise KeyError("无法在样本中找到 question 字段")
+    choices = sample["choices"]
+    options = "\n".join([f"{chr(65+i)}. {c}" for i, c in enumerate(choices)])
+
+    # 拼接
+    query = f"{question}\n\nChoices:\n{options}\n\nWhich one is correct?"
+    print(f"Processing question: {query}")
+
+    if "answer" in sample:
+        gold_answers = sample["answer"]
+    elif "answers" in sample:
+        gold_answers = sample["answers"]
+    else:
+        gold_answers = []
+    print(f"Gold answers: {gold_answers}")
+    return query, gold_answers
