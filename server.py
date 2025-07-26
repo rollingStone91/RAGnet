@@ -4,6 +4,7 @@ from langchain.schema import Document
 from client import Client
 import time
 import re
+from privacy_proof import PrivacyProofAPI
 
 
 class Server:
@@ -13,8 +14,9 @@ class Server:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b"):
+    def __init__(self, model_name: str = "qwen:4b", base_url="http://17164778.r9.cpolar.top"):
         self.llm = ChatOllama(model=model_name)
+        self.privacy_proof = PrivacyProofAPI(base_url=base_url)
 
     def verify_documents(self):
         return

@@ -2,7 +2,7 @@ from evaluate import load as load_metric
 import pandas as pd
 from client import Client
 from server import Server
-from validation_tools import load_sampled_dataset, compute_prf
+from validation_tools import load_sampled_dataset
 import validation_tools
 
 datasets = {
@@ -38,7 +38,7 @@ def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5, d
         f1_score = qa_metrics["f1"]
 
         # 计算自定义 P/R/F1  
-        precision, recall, pr_f1 = compute_prf(answer, gold_answers)
+        precision, recall, pr_f1 = validation_tools.compute_prf(answer, gold_answers)
 
         results.append({
             "question": question,
@@ -65,5 +65,5 @@ if __name__ == "__main__":
                Client(vectorstore_path="./law_related_db"), Client(vectorstore_path="./medicine_related_db")]
     for c in clients:
         c.load_vectorstore()
-    server = Server(model_name="qwen3:4b")
+    server = Server(model_name="qwen:4b")
     evaluate_natural_questions(clients, server, top_k=5, dataset_name='natural_questions', output_csv="natural_questions_results.csv")

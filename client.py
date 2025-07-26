@@ -10,44 +10,51 @@ from langchain_community.embeddings import DashScopeEmbeddings
 from datasets import load_dataset
 from langchain.schema import Document
 from langchain_experimental.text_splitter import SemanticChunker
+from langchain.embeddings import HuggingFaceEmbeddings
 import numpy as np
 import json
+# from llama_cpp import Llama
 import faiss
-from llama_cpp import Llama
+import torch
 from langchain.embeddings.base import Embeddings
 
 class Proof():
-    def __init__(self, document: Document, vector: List[np.ndarray], score: float):
+    def __init__(self, document: Document, vector: List[np.ndarray], score: float,
+                  pedersen_id=None, groth_id=None):
         self.document = document
         self.vector = vector
         self.score = score
+        self.pedersen_id = pedersen_id
+        self.groth_id = groth_id
 
-# 自定义 LangChain 的 Embeddings 类封装
-class LlamaCppEmbeddings(Embeddings):
-    def __init__(self, model_path: str):
-        self.llm = Llama(model_path=model_path, embedding=True)
 
-    def embed_documents(self, texts: list[str]):
-        # return [self.llm.embed(text)["data"][0]["embedding"] for text in texts]
-        embeddings = []
-        for text in texts:
-            result = self.llm.embed(text)
-            if isinstance(result, list) and isinstance(result[0], list):
-                embeddings.append(result[0])
-            else:
-                embeddings.append(result)
-        return embeddings
 
-    def embed_query(self, text):
-        # return self.llm.embed(text)["data"][0]["embedding"]
-        result = self.llm.embed(text)
-        return result[0] if isinstance(result, list) and isinstance(result[0], list) else result
+# # 自定义 LangChain 的 Embeddings 类封装
+# class LlamaCppEmbeddings(Embeddings):
+#     def __init__(self, model_path: str):
+#         self.llm = Llama(model_path=model_path, embedding=True)
+
+#     def embed_documents(self, texts: list[str]):
+#         # return [self.llm.embed(text)["data"][0]["embedding"] for text in texts]
+#         embeddings = []
+#         for text in texts:
+#             result = self.llm.embed(text)
+#             if isinstance(result, list) and isinstance(result[0], list):
+#                 embeddings.append(result[0])
+#             else:
+#                 embeddings.append(result)
+#         return embeddings
+
+#     def embed_query(self, text):
+#         # return self.llm.embed(text)["data"][0]["embedding"]
+#         result = self.llm.embed(text)
+#         return result[0] if isinstance(result, list) and isinstance(result[0], list) else result
     
 class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, model_path: str = "./models/Qwen3-Embedding/Qwen3-Embedding-0.6B-Q8_0.gguf", 
+    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", 
                 vectorstore_path: str = "faiss_db"): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
@@ -55,17 +62,21 @@ class Client:
         #     model="text-embedding-v1",
         #     dashscope_api_key=dashscope_api_key
         # )
-        self.embeddings = LlamaCppEmbeddings(model_path=model_path)
+        self.embeddings = HuggingFaceEmbeddings(
+                                                model_name=model_path
+                                                )
+        # self.embeddings = LlamaCppEmbeddings(model_path=model_path)
+        # model_kwargs={"device": "cpu"}
         self.db: FAISS = None
 
-    def _chunk_text(self, text: str, chunk_size=800, overlap= 200) -> list[str]:
+    def _chunk_text(self, text: str, chunk_size=4000, overlap= 200) -> list[str]:
         """
         将文本分块处理，使用递归字符分割器。
         """
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=overlap,
-            separators=["\n\n", "\n", "。", ".", "！", "？", "!", "?", " ", ""],
+            separators=["\n\n", "\n", " ", ""],
             length_function=len
         )
         return splitter.split_text(text)
@@ -143,27 +154,59 @@ class Client:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
 
-        # 使用 SemanticChunker 分块
-        chunks = self._semantic_chunk_docs(docs, buffer_size, threshold_type, sentence_split_regex)
-        print(f"Total chunks after semantic split: {len(chunks)}")
-
         # 构建 FAISS
         texts, metadatas = [], []
-        for i, doc in enumerate(chunks):
-            texts.append(doc.page_content)
-            metadatas.append({
-                "source": doc.metadata.get("source", ""),
-                "doc_id": doc.metadata.get("doc_id", ""),
-                "faiss_id": i
-            })
-            if len(texts) >= batch_size or i == len(chunks) - 1:
-                if self.db is None:
-                    self.db = FAISS.from_texts(texts, embedding=self.embeddings, metadatas=metadatas, normalize_L2=True)
-                else:
-                    self.db.add_texts(texts, metadatas=metadatas)
-                texts.clear()
-                metadatas.clear()
-                print(f"Inserted batch up to chunk {i+1}/{len(chunks)}")
+        faiss_id = 0
+        for doc in docs:
+            # 为了避免显存爆炸，首先对文档进行字符切块
+            chunks = self._chunk_text(doc.page_content)
+            print(f"Total chunks after Character split: {len(chunks)}")
+            for c in chunks:
+                # 再使用SemanticChunker分块
+                semantic_chunk = self._semantic_chunk_docs([Document(page_content=c, metadata=doc.metadata)], 
+                                                           buffer_size, threshold_type, sentence_split_regex)
+                print(f"Total chunks after semantic split: {len(semantic_chunk)}")
+
+                # 把短块和前一个块合并
+                MIN_LEN = 50  # 低于这个字符数的块，认为过短
+                merged = []
+                for chunk_doc in semantic_chunk:
+                    text = chunk_doc.page_content
+                    if len(text.strip()) < MIN_LEN and merged:
+                        # 短块，且已有前一个块，则合并
+                        prev = merged[-1]
+                        # 保持前一个 Document 的 metadata 不变，仅拼接文本
+                        prev.page_content = prev.page_content + " " + text
+                    else:
+                        # 正常块，直接添加
+                        merged.append(Document(page_content=text, metadata=chunk_doc.metadata))
+
+                # 用merged进行后续处理
+                for i, d in enumerate(merged):
+                    faiss_id += 1
+                    texts.append(d.page_content)
+                    metadatas.append({
+                        "source": d.metadata.get("source", ""),
+                        "doc_id": d.metadata.get("doc_id", ""),
+                        "faiss_id": faiss_id
+                    })
+                    if len(texts) >= batch_size or i == len(merged) - 1:
+                        if self.db is None:
+                            self.db = FAISS.from_texts(
+                                texts,
+                                embedding=self.embeddings,
+                                metadatas=metadatas,
+                                normalize_L2=True
+                            )
+                        else:
+                            self.db.add_texts(texts, metadatas=metadatas)
+                        texts.clear()
+                        metadatas.clear()
+                        print(f"Inserted batch up to merged chunk {i+1}/{len(merged)}")
+            # 清理缓存，避免显存累积
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
 
         # 保存向量库
         if self.db:
