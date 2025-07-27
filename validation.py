@@ -5,23 +5,22 @@ from server import Server
 from validation_tools import load_sampled_dataset
 import validation_tools
 
-datasets = {
-    "natural_questions": load_sampled_dataset("google-research-datasets/natural_questions", split="validation", sample_size=100),
-    "trivia_qa": load_sampled_dataset("mandarjoshi/trivia_qa", "rc", split="validation", sample_size=100),
-    "squad": load_sampled_dataset("rajpurkar/squad", split="validation", sample_size=100),
-    "web_questions": load_sampled_dataset("stanfordnlp/web_questions", split="test", sample_size=100),
-    "mmlu": load_sampled_dataset("cais/mmlu", "all", split="validation", sample_size=100),
-    "strategy_qa": load_sampled_dataset("wics/strategy-qa", split="validation", sample_size=100),
-    "hotpot_qa": load_sampled_dataset("hotpot_qa", split="validation", sample_size=100)  # 移除 fullwiki
-}
+# datasets = {
+#     "natural_questions": load_sampled_dataset("google-research-datasets/natural_questions", split="validation", sample_size=100),
+#     "trivia_qa": load_sampled_dataset("mandarjoshi/trivia_qa", "rc", split="validation", sample_size=100),
+#     "squad": load_sampled_dataset("rajpurkar/squad", split="validation", sample_size=100),
+#     "web_questions": load_sampled_dataset("stanfordnlp/web_questions", split="test", sample_size=100),
+#     "mmlu": load_sampled_dataset("cais/mmlu", "all", split="validation", sample_size=100),
+#     "strategy_qa": load_sampled_dataset("wics/strategy-qa", split="validation", sample_size=100),
+#     "hotpot_qa": load_sampled_dataset("hotpot_qa", split="validation", sample_size=100)  # 移除 fullwiki
+# }
 
-def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5, dataset_name = 'natural_questions',
-                                output_csv: str = "natural_questions_results.csv"): 
+def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5, samples=[],
+                                output_csv: str = "trivia_qa_results.csv"): 
     results = []
-    samples = datasets.get(dataset_name)
     for idx, sample in enumerate(samples):
         # 提取question和gold answers
-        question, gold_answers = validation_tools.get_natural_questions(sample)
+        question, gold_answers = validation_tools.get_trivia_qa(sample)
 
         # 调用 LLM Server
         latency, answer = server.multi_client_generate(question, clients, top_k)
@@ -59,11 +58,3 @@ def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5, d
     df = pd.DataFrame(results)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"Saved Natural Questions results to {output_csv}")
-
-if __name__ == "__main__":
-    clients = [Client(vectorstore_path="./common_sense_db"), Client(vectorstore_path="./computer_science_coding_related_db"),
-               Client(vectorstore_path="./law_related_db"), Client(vectorstore_path="./medicine_related_db")]
-    for c in clients:
-        c.load_vectorstore()
-    server = Server(model_name="qwen:4b")
-    evaluate_natural_questions(clients, server, top_k=5, dataset_name='natural_questions', output_csv="natural_questions_results.csv")

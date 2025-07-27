@@ -20,13 +20,13 @@ from langchain.embeddings.base import Embeddings
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray], score: float,
-                  pedersen_id=None, groth_id=None):
+                  pedersen_id=None, groth_id=None, pog_id=None):
         self.document = document
         self.vector = vector
         self.score = score
         self.pedersen_id = pedersen_id
         self.groth_id = groth_id
-
+        self.pog_id = pog_id
 
 
 # # 自定义 LangChain 的 Embeddings 类封装
@@ -55,19 +55,33 @@ class Client:
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
     def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", 
-                vectorstore_path: str = "faiss_db"): # dashscope_api_key: str,使用api调用embedding模型
+                vectorstore_path: str = "faiss_db", MIN_LEN = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
+        self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
+                                                encode_kwargs={"normalize_embeddings": True})
+        self.db: FAISS = None
+        self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
         # self.embeddings = DashScopeEmbeddings(
         #     model="text-embedding-v1",
         #     dashscope_api_key=dashscope_api_key
         # )
-        self.embeddings = HuggingFaceEmbeddings(
-                                                model_name=model_path
-                                                )
         # self.embeddings = LlamaCppEmbeddings(model_path=model_path)
-        # model_kwargs={"device": "cpu"}
-        self.db: FAISS = None
+
+    def _merge_short_chunks(self, chunks: List[str]) -> List[str]:
+        """
+        合并过短块（< MIN_LEN），避免出现单独 '.' 或无意义内容。
+        """
+        merged_chunks = []
+        for c in chunks:
+            if len(c) < self.MIN_LEN:
+                if merged_chunks:
+                    merged_chunks[-1] += " " + c  # 合并到前一个块
+                else:
+                    merged_chunks.append(c)  # 第一个块直接保留
+            else:
+                merged_chunks.append(c)
+        return merged_chunks
 
     def _chunk_text(self, text: str, chunk_size=4000, overlap= 200) -> list[str]:
         """
@@ -79,7 +93,10 @@ class Client:
             separators=["\n\n", "\n", " ", ""],
             length_function=len
         )
-        return splitter.split_text(text)
+        chunks = splitter.split_text(text)
+        # 过滤空块或纯符号块
+        chunks = [c.strip() for c in chunks if len(c.strip()) > 0]
+        return self._merge_short_chunks(chunks)
     
     def _semantic_chunk_docs(self, docs: list[Document],
                              buffer_size=3,
@@ -94,8 +111,13 @@ class Client:
             breakpoint_threshold_type=breakpoint_threshold_type,
             sentence_split_regex=sentence_split_regex
         )
-        return splitter.split_documents(docs)
+        chunks = splitter.split_documents(docs)
 
+        # 过滤空块并合并短块
+        texts = [d.page_content.strip() for d in chunks if len(d.page_content.strip()) > 0]
+        merged = self._merge_short_chunks(texts)
+        return [Document(page_content=text) for text in merged]
+    
     # 读取PDF文件并提取文本内容
     def _read_pdfs(self, pdf_paths: List[str]) -> List[Document]:
         docs = []
@@ -109,8 +131,7 @@ class Client:
     # 读取JSON文件夹中的所有文件
     def _load_json_folder(self, folder_path: str) -> List[Document]:
         docs = []
-        i = 0
-        for filename in os.listdir(folder_path):
+        for i, filename in enumerate(os.listdir(folder_path)):
             if not filename.endswith('.json'):
                 continue
             filepath = os.path.join(folder_path, filename)
@@ -130,8 +151,8 @@ class Client:
         for i, item in enumerate(dataset['train']):
             if i >= sample_size:
                 break
-            text = item.get('text', '')
-            title = item.get('title', '')
+            text = item.get('text', '').strip()
+            title = item.get('title', '').strip()
             if not text:
                 continue
             # snippet = text[:5000]
@@ -163,34 +184,19 @@ class Client:
             print(f"Total chunks after Character split: {len(chunks)}")
             for c in chunks:
                 # 再使用SemanticChunker分块
-                semantic_chunk = self._semantic_chunk_docs([Document(page_content=c, metadata=doc.metadata)], 
+                semantic_chunk = self._semantic_chunk_docs([Document(page_content=c)], 
                                                            buffer_size, threshold_type, sentence_split_regex)
                 print(f"Total chunks after semantic split: {len(semantic_chunk)}")
-
-                # 把短块和前一个块合并
-                MIN_LEN = 50  # 低于这个字符数的块，认为过短
-                merged = []
-                for chunk_doc in semantic_chunk:
-                    text = chunk_doc.page_content
-                    if len(text.strip()) < MIN_LEN and merged:
-                        # 短块，且已有前一个块，则合并
-                        prev = merged[-1]
-                        # 保持前一个 Document 的 metadata 不变，仅拼接文本
-                        prev.page_content = prev.page_content + " " + text
-                    else:
-                        # 正常块，直接添加
-                        merged.append(Document(page_content=text, metadata=chunk_doc.metadata))
-
                 # 用merged进行后续处理
-                for i, d in enumerate(merged):
+                for i, d in enumerate(semantic_chunk):
                     faiss_id += 1
                     texts.append(d.page_content)
                     metadatas.append({
-                        "source": d.metadata.get("source", ""),
-                        "doc_id": d.metadata.get("doc_id", ""),
+                        "source": doc.metadata.get("source", ""),
+                        "doc_id": doc.metadata.get("doc_id", ""),
                         "faiss_id": faiss_id
                     })
-                    if len(texts) >= batch_size or i == len(merged) - 1:
+                    if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
                             self.db = FAISS.from_texts(
                                 texts,
@@ -202,7 +208,7 @@ class Client:
                             self.db.add_texts(texts, metadatas=metadatas)
                         texts.clear()
                         metadatas.clear()
-                        print(f"Inserted batch up to merged chunk {i+1}/{len(merged)}")
+                        print(f"Inserted batch up to merged chunk {i+1}/{len(semantic_chunk)}")
             # 清理缓存，避免显存累积
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -236,7 +242,7 @@ class Client:
         # 检查向量库是否已加载
         if self.db is None:
             raise ValueError("Vectorstore尚未加载，请先调用load_vectorstore或build_vectorstore")
-
+        
         # 查询向量并归一化
         query_vec = np.array(self.embeddings.embed_query(query), dtype=np.float32)
         query_norm = query_vec / np.linalg.norm(query_vec)
