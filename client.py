@@ -1,6 +1,6 @@
 import os
 from langchain_community.document_loaders import PyPDFLoader
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Union
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import FAISS
@@ -17,6 +17,7 @@ import json
 import faiss
 import torch
 from langchain.embeddings.base import Embeddings
+import pandas as pd
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray], score: float,
@@ -59,7 +60,8 @@ class Client:
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
         self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
-                                                encode_kwargs={"normalize_embeddings": True})
+                                                encode_kwargs={"normalize_embeddings": True},
+                                                multi_process=True)
         self.db: FAISS = None
         self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
         # self.embeddings = DashScopeEmbeddings(
@@ -70,7 +72,7 @@ class Client:
 
     def _merge_short_chunks(self, chunks: List[str]) -> List[str]:
         """
-        合并过短块（< MIN_LEN），避免出现单独 '.' 或无意义内容。
+        合并过短块（< MIN_LEN），避免出现无意义内容。
         """
         merged_chunks = []
         for c in chunks:
@@ -121,7 +123,7 @@ class Client:
     # 读取PDF文件并提取文本内容
     def _read_pdfs(self, pdf_paths: List[str]) -> List[Document]:
         docs = []
-        for i, path in enumerate(pages):
+        for i, path in enumerate(pdf_paths):
             loader = PyPDFLoader(path)
             pages = loader.load_and_split()
             for page in pages:
@@ -140,7 +142,6 @@ class Client:
             content = f"{data.get('title', '')}\n{data.get('content', '')}".strip()
             if content:
                 docs.append(Document(page_content=content, metadata={'source': filepath, 'doc_id': i}))
-                i+=1
         return docs
     
     # 在线读取数据集
@@ -161,9 +162,53 @@ class Client:
         print(f"Streamed {len(docs)} Wikipedia docs.")
         return docs
     
+    def _load_pubmedqa(self, data_files: Union[str, List[str]]) -> List[Document]:
+        """
+        从本地 parquet 文件加载 PubMedQA 数据集，输出 Document 列表。
+        data_files: 单个文件路径或路径列表。
+        """
+        pubmedqa_ds = load_dataset("parquet", data_files=data_files, split="train")
+        docs = []
+        for ex in pubmedqa_ds:
+            pubid = ex.get('pubid', '')
+            question = ex.get('question', '')
+            contexts = ex.get('contexts', []) or ex.get('context', []) or []
+            text = question + "\n" + "\n".join(contexts)
+            if text.strip():
+                docs.append(Document(page_content=text,
+                                     metadata={'source': data_files, 'doc_id': pubid}))
+        return docs
+    
+    def _load_legalbench(self, data_dir: str ="./datasets/legalbench/data", tasks: Union[str, List[str]]="abercrombie") -> List[Document]:
+        """
+        从本地下载的 LegalBench 数据目录加载指定任务。
+        支持 .tsv 格式，如 abercrombie/train.tsv；
+        data_dir: 根目录；tasks: 单个或列表，任务名称。
+        """
+        docs = []
+        tasks = [tasks] if isinstance(tasks, str) else tasks
+        for task in tasks:
+            task_dir = os.path.join(data_dir, task)
+            tsv_path = os.path.join(task_dir, 'train.tsv')
+            if not os.path.exists(tsv_path):
+                continue
+            df = pd.read_csv(tsv_path, sep='\t')
+            for _, row in df.iterrows():
+                text = str(row.get('text', '')).strip()
+                answer = row.get('answer') or row.get('label', '')
+                input_content = text if not answer else f"Answer: {answer}\n{text}"
+                metadata = {
+                    'source': f'legalbench/{task}',
+                    'task': task,
+                    'idx': int(row.get('index', row.get('idx', 0)))
+                }
+                docs.append(Document(page_content=input_content, metadata=metadata))
+        return docs
+    
     def build_vectorstore(self, sample_size=100, batch_size=10, 
                           streaming=False, folder_path=None, pdf_paths:List[str]=None,
-                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+"):
+                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",
+                          incremental=False):
         docs = []
         if streaming:
             # 在线读取数据集
@@ -174,6 +219,10 @@ class Client:
         elif pdf_paths is not None:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
+
+        # 支持增量构建：如已有索引，先加载
+        if incremental and os.path.exists(self.vectorstore_path):
+            self.load_vectorstore()
 
         # 构建 FAISS
         texts, metadatas = [], []

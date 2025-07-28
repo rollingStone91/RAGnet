@@ -2,20 +2,9 @@ from evaluate import load as load_metric
 import pandas as pd
 from client import Client
 from server import Server
-from validation_tools import load_sampled_dataset
 import validation_tools
 
-# datasets = {
-#     "natural_questions": load_sampled_dataset("google-research-datasets/natural_questions", split="validation", sample_size=100),
-#     "trivia_qa": load_sampled_dataset("mandarjoshi/trivia_qa", "rc", split="validation", sample_size=100),
-#     "squad": load_sampled_dataset("rajpurkar/squad", split="validation", sample_size=100),
-#     "web_questions": load_sampled_dataset("stanfordnlp/web_questions", split="test", sample_size=100),
-#     "mmlu": load_sampled_dataset("cais/mmlu", "all", split="validation", sample_size=100),
-#     "strategy_qa": load_sampled_dataset("wics/strategy-qa", split="validation", sample_size=100),
-#     "hotpot_qa": load_sampled_dataset("hotpot_qa", split="validation", sample_size=100)  # 移除 fullwiki
-# }
-
-def evaluate_natural_questions(clients: list[Client], server: Server, top_k=5, samples=[],
+def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[],
                                 output_csv: str = "trivia_qa_results.csv"): 
     results = []
     for idx, sample in enumerate(samples):

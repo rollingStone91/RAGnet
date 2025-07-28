@@ -4,6 +4,15 @@ import re
 # 工具函数
 
 # 数据集加载（streaming 模式 + 采样）
+# datasets = {
+    # load_dataset("google-research-datasets/natural_questions", None, "validation"),
+    # load_dataset("mandarjoshi/trivia_qa", "rc", "validation"),
+    # load_dataset("rajpurkar/squad", None, "validation"),
+    # load_dataset("stanfordnlp/web_questions", None, "test"),
+    # load_dataset("cais/mmlu", "all", "validation"),
+    # load_dataset("wics/strategy-qa", None, split="train"),
+    # load_dataset("hotpot_qa", "distractor", "validation", trust_remote_code=True)
+# }
 def load_sampled_dataset(name, config=None, split="validation", sample_size=100):
     try:
         ds = load_dataset(name, config, split=split, streaming=True)
