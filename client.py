@@ -227,7 +227,7 @@ class Client:
         # 构建 FAISS
         texts, metadatas = [], []
         faiss_id = 0
-        for doc in docs:
+        for j, doc in enumerate(docs):
             # 为了避免显存爆炸，首先对文档进行字符切块
             chunks = self._chunk_text(doc.page_content)
             print(f"Total chunks after Character split: {len(chunks)}")
@@ -262,6 +262,7 @@ class Client:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
+            print(f"Inserted batch up to docs {j+1}/{len(docs)}")
 
         # 保存向量库
         if self.db:
