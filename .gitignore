@@ -1,0 +1,12 @@
+# 忽略 classified 目录
+classified/
+
+# 忽略 __pycache__ 文件夹
+__pycache__/
+
+# 忽略临时数据目录
+classified_dataset/
+
+datasets/
+
+models/

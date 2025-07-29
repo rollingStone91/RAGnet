@@ -1,0 +1,13 @@
+numpy==1.23.5
+faiss-gpu==1.7.2
+langchain
+langchain_community
+langchain_experimental
+pandas
+torch
+evaluate
+datasets
+huggingface_hub
+transformers 
+accelerate 
+sentence-transformers
