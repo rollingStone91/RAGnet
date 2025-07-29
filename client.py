@@ -240,20 +240,27 @@ class Client:
                         print(f"Error parsing line {i} in {file}: {e}")
         return docs
     
-    def build_vectorstore(self, sample_size=100, batch_size=10, start=0, step=1000,
-                          streaming=False, folder_path=None, pdf_paths:List[str]=None,
-                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",
+    def build_vectorstore(self, batch_size=10,
+                          start=0, step=1000, folder_path=None, # 用于加载json
+                          streaming=False, sample_size=100,# 用于在线加载
+                          pdf_paths:List[str]=None, # 用于加载pdf
+                          tasks: Union[str, List[str]]=None, #用于加载legalbench
+                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",# 用于语义分割
                           incremental=False):
         docs = []
         if streaming:
             # 在线读取数据集
             docs.extend(self._streaming_load_dataset(sample_size))
-        elif folder_path is not None and pdf_paths is None:
+        elif folder_path is not None:
             # 从指定文件夹加载JSON文件
             docs.extend(self._load_json_folder(folder_path, start, step))
         elif pdf_paths is not None:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
+        elif task is not None:
+            # 加载legalbench
+            docs.extend(self._load_legalbench(tasks=tasks))
+        
 
         # 支持增量构建：如已有索引，先加载
         if incremental and os.path.exists(self.vectorstore_path):
@@ -285,8 +292,7 @@ class Client:
                             self.db = FAISS.from_texts(
                                 texts,
                                 embedding=self.embeddings,
-                                metadatas=metadatas,
-                                normalize_L2=True
+                                metadatas=metadatas
                             )
                         else:
                             self.db.add_texts(texts, metadatas=metadatas)
