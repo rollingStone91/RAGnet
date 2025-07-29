@@ -86,6 +86,8 @@ class Client:
                     merged_chunks.append(c)  # 第一个块直接保留
             else:
                 merged_chunks.append(c)
+        # 再进行一次筛选，直接舍去合并后长度仍旧太小的块
+        merged_chunks = [c.strip() for c in merged_chunks if len(c.strip()) > 20]
         return merged_chunks
 
     def _chunk_text(self, text: str, chunk_size=4000, overlap= 200) -> list[str]:
@@ -199,11 +201,12 @@ class Client:
             for _, row in df.iterrows():
                 text = str(row.get('text', '')).strip()
                 answer = row.get('answer') or row.get('label', '')
-                input_content = text if not answer else f"Answer: {answer}\n{text}"
+                input_content = text
                 metadata = {
                     'source': f'legalbench/{task}',
                     'task': task,
-                    'idx': int(row.get('index', row.get('idx', 0)))
+                    'idx': int(row.get('index', row.get('idx', 0))),
+                    'answer': answer
                 }
                 docs.append(Document(page_content=input_content, metadata=metadata))
         return docs
@@ -257,7 +260,7 @@ class Client:
         elif pdf_paths is not None:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
-        elif task is not None:
+        elif tasks is not None:
             # 加载legalbench
             docs.extend(self._load_legalbench(tasks=tasks))
         
@@ -285,6 +288,10 @@ class Client:
                     metadatas.append({
                         "source": doc.metadata.get("source", ""),
                         "doc_id": doc.metadata.get("doc_id", ""),
+                        #用来保存legalbench中的信息
+                        'task': doc.metadata.get("task", ""),
+                        'idx': doc.metadata.get("idx", ""),
+                        'answer':doc.metadata.get("answer", ""),
                         "faiss_id": faiss_id
                     })
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:

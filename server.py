@@ -6,6 +6,7 @@ import asyncio
 import time
 import re
 from privacy_proof import PrivacyProofAPI
+import json
 
 
 class Server:
@@ -26,7 +27,7 @@ class Server:
         )
         return proofs, q_vec
 
-    def build_prompt(self, query: str, contexts: List[str]) -> str:
+    def build_prompt(self, query: str, contexts: List[str], metadatas) -> str:
         """构造 Prompt，将 query 和上下文拼接"""
         # 精炼指令：System + User 模式
         system_msg = """
@@ -52,8 +53,8 @@ class Server:
         Sources: Context 1
         """
         user_msg = "Contexts:\n"
-        for i, c in enumerate(contexts, 1):
-            user_msg += f"[Context {i}] {c}\n"
+        for i, (c, m) in enumerate(zip(contexts, metadatas)):
+            user_msg += f"[Context {i+1}] {c}\n[Metadata {i+1}] {json.dumps(m, ensure_ascii=False)}\n"
         user_msg += f"Question: {query}\nProvide your answer and cite context numbers."
 
         prompt = system_msg + "\n" + few_shot + "\n" + user_msg
@@ -73,8 +74,8 @@ class Server:
             return match.group(1).strip()
         return cleaned.strip()
     
-    def generate_answer(self, query: str, contexts: List[str]) -> str:
-        prompt = self.build_prompt(query, contexts)
+    def generate_answer(self, query: str, contexts: List[str], metadatas) -> str:
+        prompt = self.build_prompt(query, contexts, metadatas)
         response = self.llm.predict(prompt)
         answer = self.clean_answer(response)
         print(f"answer:{answer}")
@@ -113,10 +114,12 @@ class Server:
         selected = all_proofs[:top_k]
         # 请求对应client提供真实上下文
         contexts = [r.document.page_content for r in selected]
+        metadatas = [r.document.metadata for r in selected]
         print(f"contexts: {contexts}") 
+        print(f"metadatas: {metadatas}")
         
         #生成答案并清洗
-        answer = self.generate_answer(query, contexts)
+        answer = self.generate_answer(query, contexts, metadatas)
         latency = time.time() - start
 
         return latency, answer
