@@ -49,13 +49,13 @@ class Server:
         2. Context 1 states that the Sun is the star at the center.
         3. Context 2 is not relevant to this question.
         </think>
-        Final Answer: The Sun.
+        Answer: The Sun.
         Sources: Context 1
         """
         user_msg = "Contexts:\n"
         for i, (c, m) in enumerate(zip(contexts, metadatas)):
             user_msg += f"[Context {i+1}] {c}\n[Metadata {i+1}] {json.dumps(m, ensure_ascii=False)}\n"
-        user_msg += f"Question: {query}\nProvide your answer and cite context numbers."
+        user_msg += f"Question: {query}\nProvide your answer."
 
         prompt = system_msg + "\n" + few_shot + "\n" + user_msg
         return prompt
@@ -102,10 +102,10 @@ class Server:
 
         # flatten proofs
         all_proofs = [p for r in results for p in r["proofs"]]
-        print(f"all_proofs: {all_proofs}")
+        # print(f"all_proofs: {all_proofs}")
 
-        for i, proof in enumerate(all_proofs):
-            print(f"context {i}: {proof.document}")
+        # for i, proof in enumerate(all_proofs):
+        #     print(f"context {i}: {proof.document}")
             
         # 根据得分进行排序，选出最优proofs
         all_proofs.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
@@ -115,8 +115,10 @@ class Server:
         # 请求对应client提供真实上下文
         contexts = [r.document.page_content for r in selected]
         metadatas = [r.document.metadata for r in selected]
+        scores = [r.score for r in selected]
         print(f"contexts: {contexts}") 
         print(f"metadatas: {metadatas}")
+        print(f"scores: {scores}")
         
         #生成答案并清洗
         answer = self.generate_answer(query, contexts, metadatas)

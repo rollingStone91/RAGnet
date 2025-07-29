@@ -271,7 +271,6 @@ class Client:
 
         # 构建 FAISS
         texts, metadatas = [], []
-        faiss_id = 0
         for j, doc in enumerate(docs):
             # 为了避免显存爆炸，首先对文档进行字符切块
             chunks = self._chunk_text(doc.page_content)
@@ -283,7 +282,6 @@ class Client:
                 print(f"Total chunks after semantic split: {len(semantic_chunk)}")
                 # 用merged进行后续处理
                 for i, d in enumerate(semantic_chunk):
-                    faiss_id += 1
                     texts.append(d.page_content)
                     metadatas.append({
                         "source": doc.metadata.get("source", ""),
@@ -291,8 +289,7 @@ class Client:
                         #用来保存legalbench中的信息
                         'task': doc.metadata.get("task", ""),
                         'idx': doc.metadata.get("idx", ""),
-                        'answer':doc.metadata.get("answer", ""),
-                        "faiss_id": faiss_id
+                        'answer':doc.metadata.get("answer", "")
                     })
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
