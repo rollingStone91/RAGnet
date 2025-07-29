@@ -60,8 +60,9 @@ class Client:
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
         self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
-                                                encode_kwargs={"normalize_embeddings": True},
-                                                multi_process=True)
+                                                model_kwargs={"device": "cuda"},
+                                                encode_kwargs={"normalize_embeddings": True},)
+                                                # multi_process=True)
         self.db: FAISS = None
         self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
         # self.embeddings = DashScopeEmbeddings(
@@ -131,17 +132,17 @@ class Client:
         return docs
 
     # 读取JSON文件夹中的所有文件
-    def _load_json_folder(self, folder_path: str) -> List[Document]:
+    def _load_json_folder(self, folder_path: str, start=0, step=1000) -> List[Document]:
         docs = []
-        for i, filename in enumerate(os.listdir(folder_path)):
-            if not filename.endswith('.json'):
-                continue
+        json_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.json')])
+        selected_files = json_files[start:start + step]  # 选取指定范围的文件
+        for i, filename in enumerate(selected_files):
             filepath = os.path.join(folder_path, filename)
             with open(filepath, encoding='utf-8') as f:
                 data = json.load(f)
             content = f"{data.get('title', '')}\n{data.get('content', '')}".strip()
             if content:
-                docs.append(Document(page_content=content, metadata={'source': filepath, 'doc_id': i}))
+                docs.append(Document(page_content=content, metadata={'source': filepath, 'doc_id': i + start}))
         return docs
     
     # 在线读取数据集
@@ -205,7 +206,7 @@ class Client:
                 docs.append(Document(page_content=input_content, metadata=metadata))
         return docs
     
-    def build_vectorstore(self, sample_size=100, batch_size=10, 
+    def build_vectorstore(self, sample_size=100, batch_size=10, start=0, step=1000,
                           streaming=False, folder_path=None, pdf_paths:List[str]=None,
                           buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",
                           incremental=False):
@@ -215,7 +216,7 @@ class Client:
             docs.extend(self._streaming_load_dataset(sample_size))
         elif folder_path is not None and pdf_paths is None:
             # 从指定文件夹加载JSON文件
-            docs.extend(self._load_json_folder(folder_path))
+            docs.extend(self._load_json_folder(folder_path, start, step))
         elif pdf_paths is not None:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
