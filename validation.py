@@ -5,11 +5,30 @@ from server import Server
 import validation_tools
 
 def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[],
-                                output_csv: str = "trivia_qa_results.csv"): 
+                                output_csv: str = "trivia_qa_results.csv", dataset_name:str = "trivia_qa"): 
+    """
+    clients: 创建的多个client
+    server: 用于生成的server
+    samples: 先加载数据集为dataset
+    output_csv: 保存的文件名
+    dataset_name: 数据集的名称("trivia_qa", "natural_questions", "squad", "mmlu",
+                             "strategy_qa", "web_questions", "hot_qa")
+    """
     results = []
     for idx, sample in enumerate(samples):
-        # 提取question和gold answers
-        question, gold_answers = validation_tools.get_trivia_qa(sample)
+        if dataset_name == "trivia_qa":
+            # 提取question和gold answers
+            question, gold_answers = validation_tools.get_trivia_qa(sample)
+        elif dataset_name == "natural_questions":
+            question, gold_answers = validation_tools.get_natural_questions(sample)
+        elif dataset_name == "squad":
+            question, gold_answers = validation_tools.get_squad(sample)
+        elif dataset_name =="mmlu":
+            question, gold_answers = validation_tools.get_mmlu(sample)
+        elif dataset_name == "strategy_qa":
+            question, gold_answers = validation_tools.get_strategyqa(sample)
+        else:
+            question, gold_answers = validation_tools.get_web_questions(sample)
 
         # 调用 LLM Server
         latency, answer = server.multi_client_generate(question, clients, top_k)

@@ -111,6 +111,7 @@ def get_squad(sample):
 def get_web_questions(sample):
     '''
     从 Web Questions 数据集中提取问题和答案。
+    hotqa也可以使用这个方法
     '''
     if "question" in sample:
         question = sample["question"]
@@ -150,3 +151,14 @@ def get_mmlu(sample):
         gold_answers = []
     print(f"Gold answers: {gold_answers}")
     return query, gold_answers
+
+def get_strategyqa(sample):
+    # 拼接 question + description
+    question = sample.get("question", "").strip()
+    desc = sample.get("description", "").strip()
+    query = f"Please answer with either True or False only.\nQuestion: {question}\n Background: {desc}\n Answer:"
+    print(f"Processing question: {query}")
+
+    gold_answer = str(sample["answer"])
+    print(f"Gold answer: {gold_answer}")
+    return query, gold_answer

@@ -18,6 +18,8 @@ import faiss
 import torch
 from langchain.embeddings.base import Embeddings
 import pandas as pd
+import glob
+import gzip
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray], score: float,
@@ -163,7 +165,7 @@ class Client:
         print(f"Streamed {len(docs)} Wikipedia docs.")
         return docs
     
-    def _load_pubmedqa(self, data_files: Union[str, List[str]]) -> List[Document]:
+    def _load_pubmedqa(self, data_files: Union[str, List[str]]="./datasets/pubmedqa/pqa_artificial") -> List[Document]:
         """
         从本地 parquet 文件加载 PubMedQA 数据集，输出 Document 列表。
         data_files: 单个文件路径或路径列表。
@@ -204,6 +206,38 @@ class Client:
                     'idx': int(row.get('index', row.get('idx', 0)))
                 }
                 docs.append(Document(page_content=input_content, metadata=metadata))
+        return docs
+    
+    def _load_codesearchnet(self, path: Union[str, List[str]] = "./datasets/code_search_net/data/python/final/jsonl/train", 
+                            language: str = 'python') -> List[Document]:
+        """
+        先把data目录下的每个zip文件解压
+        然后从本地 CodeSearchNet .jsonl.gz 文件中加载 Document 列表
+        path: 单个文件路径或路径通配符（如 'data/python/train/*.jsonl.gz'）
+        language: 选择语言配置，如 'python', 'java', 'all'
+        """
+        file_list = glob.glob(path) if isinstance(path, str) else path
+        docs = []
+        for file in file_list:
+            with gzip.open(file, 'rt', encoding='utf-8') as f:
+                for i, line in enumerate(f):
+                    try:
+                        item = json.loads(line)
+                        code = item.get("func_code_string") or item.get("whole_func_string", "")
+                        docstring = item.get("func_documentation_string", "")
+                        lang = item.get("language") or language
+                        text = f"[Language: {lang}]\n[Docstring]\n{docstring}\n\n[Code]\n{code}"
+                        metadata = {
+                        "repo": item.get("repository_name"),
+                        "func": item.get("func_name"),
+                        "path": item.get("func_path_in_repository"),
+                        "language": lang,
+                        "original_file": file,
+                        "url": item.get("func_code_url")
+                        }
+                        docs.append(Document(page_content=text, metadata=metadata))
+                    except Exception as e:
+                        print(f"Error parsing line {i} in {file}: {e}")
         return docs
     
     def build_vectorstore(self, sample_size=100, batch_size=10, start=0, step=1000,
