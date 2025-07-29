@@ -167,7 +167,7 @@ class Client:
         print(f"Streamed {len(docs)} Wikipedia docs.")
         return docs
     
-    def _load_pubmedqa(self, data_files: Union[str, List[str]]="./datasets/pubmedqa/pqa_artificial") -> List[Document]:
+    def _load_pubmedqa(self, data_files: Union[str, List[str]]="datasets/pubmedqa/pqa_artificial/train-00000-of-00001.parquet") -> List[Document]:
         """
         从本地 parquet 文件加载 PubMedQA 数据集，输出 Document 列表。
         data_files: 单个文件路径或路径列表。
@@ -247,9 +247,21 @@ class Client:
                           start=0, step=1000, folder_path=None, # 用于加载json
                           streaming=False, sample_size=100,# 用于在线加载
                           pdf_paths:List[str]=None, # 用于加载pdf
-                          tasks: Union[str, List[str]]=None, #用于加载legalbench
+                          legalbench: Union[str, List[str]]=None, #用于加载legalbench
+                          pubmedqa: Union[str, List[str]]=None, #用于加载pubmedqa
                           buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",# 用于语义分割
-                          incremental=False):
+                          incremental=True):
+        """
+        构建向量数据库
+        batch_size:10批处理大小
+        start=0, step=1000, folder_path=None: 用于加载json
+        streaming=False, sample_size=100: 用于在线加载
+        pdf_paths:List[str]=None: 用于加载pdf
+        legalbench: Union[str, List[str]]=None: 用于加载legalbench
+        pubmedqa: Union[str, List[str]]=None: 用于加载pubmedqa
+        buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+": 用于语义分割
+        incremental=True: 是否增量构建
+        """
         docs = []
         if streaming:
             # 在线读取数据集
@@ -260,9 +272,12 @@ class Client:
         elif pdf_paths is not None:
             # 从PDF文件加载
             docs.extend(self._read_pdfs(pdf_paths))
-        elif tasks is not None:
+        elif legalbench is not None:
             # 加载legalbench
             docs.extend(self._load_legalbench(tasks=tasks))
+        elif pubmedqa is not None:
+            # 加载pubmedqa
+            docs.extend(self._load_pubmedqa(data_files=pubmedqa))
         
 
         # 支持增量构建：如已有索引，先加载

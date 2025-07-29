@@ -16,8 +16,8 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
     """
     results = []
     for idx, sample in enumerate(samples):
+        # 提取question和gold answers
         if dataset_name == "trivia_qa":
-            # 提取question和gold answers
             question, gold_answers = validation_tools.get_trivia_qa(sample)
         elif dataset_name == "natural_questions":
             question, gold_answers = validation_tools.get_natural_questions(sample)
