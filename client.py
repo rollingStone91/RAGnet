@@ -233,17 +233,17 @@ class Client:
                 for i, line in enumerate(f):
                     try:
                         item = json.loads(line)
-                        code = item.get("func_code_string") or item.get("whole_func_string", "")
-                        docstring = item.get("func_documentation_string", "")
+                        code = item.get("code") or item.get("original_string", "")
+                        docstring = item.get("docstring", "")
                         lang = item.get("language") or language
-                        text = f"[Language: {lang}]\n[Docstring]\n{docstring}\n\n[Code]\n{code}"
+                        text = f"[Language: {lang}]\n[Docstring]\n{docstring}\n[Code]\n{code}"
                         metadata = {
-                        "repo": item.get("repository_name"),
+                        "repo": item.get("repo"),
                         "func": item.get("func_name"),
-                        "path": item.get("func_path_in_repository"),
+                        "path": item.get("path"),
                         "language": lang,
-                        "original_file": file,
-                        "url": item.get("func_code_url")
+                        "source": file,
+                        "url": item.get("url")
                         }
                         docs.append(Document(page_content=text, metadata=metadata))
                     except Exception as e:
@@ -289,11 +289,11 @@ class Client:
                         # 'long_answer': doc.metadata.get("long_answer",""),
                         # 'meshes': doc.metadata.get("meshes",""),
                         #用来保存codesearch
-                        "repo": doc.metadata.get("repository_name",""),
-                        "func": doc.metadata.get("func_name",""),
-                        "path": doc.metadata.get("func_path_in_repository",""),
-                        "language": doc.metadata.get("language",""),
-                        "url": doc.metadata.get("func_code_url","")
+                        # "repo": doc.metadata.get("repository_name",""),
+                        # "func": doc.metadata.get("func_name",""),
+                        # "path": doc.metadata.get("func_path_in_repository",""),
+                        # "language": doc.metadata.get("language",""),
+                        # "url": doc.metadata.get("func_code_url","")
                     })
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
