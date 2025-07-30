@@ -65,7 +65,8 @@ def get_natural_questions(sample):
     print(f"Gold answers: {gold_answers}")
     if not gold_answers:
         gold_answers = [""]  # 占位
-    return question, gold_answers
+    background = ""
+    return background, question, gold_answers
 
 def get_trivia_qa(sample):
     '''
@@ -82,16 +83,15 @@ def get_trivia_qa(sample):
     # answer 可能是字符串，也可能是list
     if "answer" in sample:
         gold_answers = sample["answer"].get('aliases', [])
-    elif "answers" in sample:
-        gold_answers = sample["answers"].get('aliases', [])
-    else:
-        gold_answers = []
+
     print(f"Gold answers: {gold_answers}")
-    return question, gold_answers
+    background = ""
+    return background, question, gold_answers
 
 def get_squad(sample):
     '''
     从 SQuAD 数据集中提取问题和答案。
+    hotqa也可以使用这个方法
     '''
     if "question" in sample:
         question = sample["question"]
@@ -99,19 +99,22 @@ def get_squad(sample):
         raise KeyError("无法在样本中找到 question 字段")
     print(f"Processing question: {question}")
 
-    if "answer" in sample:
-        gold_answers = sample["answer"].get('text', [])
-    elif "answers" in sample:
+    if "context" in sample:
+        context = sample["conetxt"]
+        background = f"Read the context and answer the question by returning the exact answer span from the context.\n Conetxt: {context}" 
+
+    if "answers" in sample:
         gold_answers = sample["answers"].get('text', [])
+    elif "answer" in sample:
+        gold_answers = sample["answer"]
     else:
         gold_answers = []
     print(f"Gold answers: {gold_answers}")
-    return question, gold_answers
+    return background, question, gold_answers
 
 def get_web_questions(sample):
     '''
     从 Web Questions 数据集中提取问题和答案。
-    hotqa也可以使用这个方法
     '''
     if "question" in sample:
         question = sample["question"]
@@ -126,7 +129,8 @@ def get_web_questions(sample):
     else:
         gold_answers = []
     print(f"Gold answers: {gold_answers}")
-    return question, gold_answers
+    background = ""
+    return background, question, gold_answers
 
 def get_mmlu(sample):
     ''' 
@@ -136,12 +140,11 @@ def get_mmlu(sample):
         question = sample["question"]
     else:
         raise KeyError("无法在样本中找到 question 字段")
+    print(f"Processing question: {question}")
+
     choices = sample["choices"]
     options = "\n".join([f"{chr(65+i)}. {c}" for i, c in enumerate(choices)])
-
-    # 拼接
-    query = f"{question}\n\nChoices:\n{options}\n\nWhich one is correct?"
-    print(f"Processing question: {query}")
+    background = f"Choices:\n{options}\n\nWhich one is correct?"
 
     if "answer" in sample:
         gold_answers = sample["answer"]
@@ -150,15 +153,15 @@ def get_mmlu(sample):
     else:
         gold_answers = []
     print(f"Gold answers: {gold_answers}")
-    return query, gold_answers
+    return background, question, gold_answers
 
 def get_strategyqa(sample):
     # 拼接 question + description
     question = sample.get("question", "").strip()
     desc = sample.get("description", "").strip()
-    query = f"Please answer with either True or False only.\nQuestion: {question}\n Background: {desc}\n Answer:"
-    print(f"Processing question: {query}")
+    background = f"Please answer with either True or False only.\n Background: {desc}\n"
+    print(f"Processing question: {question}")
 
     gold_answer = str(sample["answer"])
     print(f"Gold answer: {gold_answer}")
-    return query, gold_answer
+    return background, question, gold_answer

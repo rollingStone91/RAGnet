@@ -7,6 +7,8 @@ import time
 import re
 from privacy_proof import PrivacyProofAPI
 import json
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.schema import HumanMessage, SystemMessage
 
 
 class Server_with_Algorithm:
@@ -16,15 +18,28 @@ class Server_with_Algorithm:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://17164778.r9.cpolar.top"):
+    def __init__(self, model_name: str = "qwen3:4b", base_url="http://1d087351.r9.cpolar.top", 
+                  model_path: str = "./models/qwen3-embedding-0.6b"):
         self.llm = ChatOllama(model=model_name)
         self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
+        self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
+                                                model_kwargs={"device": "cuda"},
+                                                encode_kwargs={"normalize_embeddings": True},)
+                                                # multi_process=True)
 
-    async def _retrieve_from_client(self, client, q_vec: list, top_k: int):
+    async def _retrieve_from_client(self, client, query: str, top_k: int):
         # 并行执行客户端检索
         proofs, q_vec = await asyncio.get_event_loop().run_in_executor(
-            None, client.retrieve, q_vec, top_k
+            None, client.retrieve, query, top_k
         )
+        # 使用pedersen算法
+        for p in proofs:
+            response = self.proof_api.gen_pedersen_proof(name=client.vectorstore_path,
+                                                            K=p.vector, Q=q_vec, 
+                                                            data=p.document.page_content)
+            response = json.loads(response)
+            p.pedersen_id = response["proof_id"]
+            print(f"gen pedersen proof:{response}")
         return proofs, q_vec
 
     def build_prompt(self, query: str, contexts: List[str], metadatas) -> str:
@@ -37,6 +52,7 @@ class Server_with_Algorithm:
         - Provide a concise final answer and list which Context numbers you used.   
         - Before the final answer, show your step-by-step reasoning prefixed with “<think>” and suffixed with “</think>”.
         """
+        
         # Few‑Shot example
         few_shot = """
         ### Example
@@ -56,8 +72,9 @@ class Server_with_Algorithm:
         for i, (c, m) in enumerate(zip(contexts, metadatas)):
             user_msg += f"[Context {i+1}] {c}\n[Metadata {i+1}] {json.dumps(m, ensure_ascii=False)}\n"
         user_msg += f"Question: {query}\nProvide your answer."
+        human_msg = few_shot+"\n"+user_msg
 
-        prompt = system_msg + "\n" + few_shot + "\n" + user_msg
+        prompt = [SystemMessage(content=system_msg), HumanMessage(content=human_msg)]
         return prompt
 
     def clean_answer(self, raw: str):
@@ -74,9 +91,31 @@ class Server_with_Algorithm:
             return match.group(1).strip()
         return cleaned.strip()
     
-    def generate_answer(self, query: str, contexts: List[str], metadatas) -> str:
+    def generate_answer(self, query: str, q_vec, proofs) -> str:
+        contexts = []
+        metadatas = []
+        # 验证proof
+        for p in proofs:
+            # 取出文本并embed
+            data = p.document.page_content
+            k = self.embeddings.embed_query(data)
+            # 生成pogid
+            res = self.proof_api.gen_pog(q_vec, k, data)
+            res = json.loads(res)
+            p.pog_id = res["proof_id"]
+            # 验证proof
+            msg = self.proof_api.verify_pog(p.pedersen_id, p.pog_id)
+            msg = json.loads(msg)
+            # 验证通过则加入列表
+            if(msg == "ok"):
+                contexts.append(data)
+                metadatas.append(p.document.metadata)
+
+        print(f"contexts: {contexts}") 
+        print(f"metadatas: {metadatas}")
+
         prompt = self.build_prompt(query, contexts, metadatas)
-        response = self.llm.predict(prompt)
+        response = self.llm.invoke(prompt)
         answer = self.clean_answer(response)
         print(f"answer:{answer}")
         return answer
@@ -101,23 +140,23 @@ class Server_with_Algorithm:
         print(f"q_vecs: {q_vecs}")
 
         # flatten proofs
-        all_proofs = [p for r in results for p in r["proofs"]]
+        all_proofs = []
+        for r in results:
+            for p in r["proofs"]:
+                response = self.proof_api.verify_pedersen_proof(proof_id=p.pedersen_id)
+                response = json.loads(response)
+                print(f"verify pedersen proof:{response}")
+                if(response['msg'] == "ok"):
+                    all_proofs.append(p)
             
         # 根据得分进行排序，选出最优proofs
         all_proofs.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
 
         # 取 Top-K
         selected = all_proofs[:top_k]
-        # 请求对应client提供真实上下文
-        contexts = [r.document.page_content for r in selected]
-        metadatas = [r.document.metadata for r in selected]
-        scores = [r.score for r in selected]
-        print(f"contexts: {contexts}") 
-        print(f"metadatas: {metadatas}")
-        print(f"scores: {scores}")
         
         #生成答案并清洗
-        answer = self.generate_answer(query, contexts, metadatas)
+        answer = self.generate_answer(query=query, q_vec=q_vecs[0], proofs=selected)
         latency = time.time() - start
 
         return latency, answer

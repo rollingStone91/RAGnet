@@ -7,6 +7,7 @@ import time
 import re
 from privacy_proof import PrivacyProofAPI
 import json
+from langchain.schema import HumanMessage, SystemMessage
 
 
 class Server:
@@ -37,6 +38,7 @@ class Server:
         - Provide a concise final answer and list which Context numbers you used.   
         - Before the final answer, show your step-by-step reasoning prefixed with “<think>” and suffixed with “</think>”.
         """
+        
         # Few‑Shot example
         few_shot = """
         ### Example
@@ -56,8 +58,9 @@ class Server:
         for i, (c, m) in enumerate(zip(contexts, metadatas)):
             user_msg += f"[Context {i+1}] {c}\n[Metadata {i+1}] {json.dumps(m, ensure_ascii=False)}\n"
         user_msg += f"Question: {query}\nProvide your answer."
-
-        prompt = system_msg + "\n" + few_shot + "\n" + user_msg
+        human_msg = few_shot+"\n"+user_msg
+        
+        prompt = [SystemMessage(content=system_msg), HumanMessage(content=human_msg)]
         return prompt
 
     def clean_answer(self, raw: str):
@@ -76,7 +79,7 @@ class Server:
     
     def generate_answer(self, query: str, contexts: List[str], metadatas) -> str:
         prompt = self.build_prompt(query, contexts, metadatas)
-        response = self.llm.predict(prompt)
+        response = self.llm.invoke(prompt)
         answer = self.clean_answer(response)
         print(f"answer:{answer}")
         return answer
