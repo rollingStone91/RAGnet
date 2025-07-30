@@ -177,11 +177,18 @@ class Client:
         for ex in pubmedqa_ds:
             pubid = ex.get('pubid', '')
             question = ex.get('question', '')
-            contexts = ex.get('contexts', []) or ex.get('context', []) or []
-            text = question + "\n" + "\n".join(contexts)
-            if text.strip():
-                docs.append(Document(page_content=text,
-                                     metadata={'source': data_files, 'doc_id': pubid}))
+            answer = ex.get('final_decision','')
+            long_answer = ex.get('long_answer', '')
+            contexts = ex["context"]["contexts"]
+            labels = ex["context"]["labels"]
+            meshes = ex["context"].get("meshes", [])
+            context_text = f"Question:{question}"
+            context_text += "\n".join([f"{label}:{text}" for label, text in zip(labels, contexts)])
+            if context_text.strip():
+                docs.append(Document(page_content=context_text,
+                                     metadata={'source': data_files, 'doc_id': pubid, 
+                                               'answer': answer, 'long_answer': long_answer,
+                                                'meshes': meshes}))
         return docs
     
     def _load_legalbench(self, data_dir: str ="./datasets/legalbench/data", tasks: Union[str, List[str]]="abercrombie") -> List[Document]:
@@ -211,7 +218,7 @@ class Client:
                 docs.append(Document(page_content=input_content, metadata=metadata))
         return docs
     
-    def _load_codesearchnet(self, path: Union[str, List[str]] = "./datasets/code_search_net/data/python/final/jsonl/train", 
+    def _load_codesearchnet(self, path: Union[str, List[str]] = "./datasets/code_search_net/data/python/final/jsonl/train/*.jsonl.gz", 
                             language: str = 'python') -> List[Document]:
         """
         先把data目录下的每个zip文件解压
@@ -243,43 +250,14 @@ class Client:
                         print(f"Error parsing line {i} in {file}: {e}")
         return docs
     
-    def build_vectorstore(self, batch_size=10,
-                          start=0, step=1000, folder_path=None, # 用于加载json
-                          streaming=False, sample_size=100,# 用于在线加载
-                          pdf_paths:List[str]=None, # 用于加载pdf
-                          legalbench: Union[str, List[str]]=None, #用于加载legalbench
-                          pubmedqa: Union[str, List[str]]=None, #用于加载pubmedqa
-                          buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+",# 用于语义分割
-                          incremental=True):
+    def build_vectorstore(self, batch_size=10, docs:List[Document]=[],                             
+                        buffer_size=3, threshold_type="percentile",
+                        sentence_split_regex=r"(?<=[.?!])\s+", incremental=True):
         """
         构建向量数据库
         batch_size:10批处理大小
-        start=0, step=1000, folder_path=None: 用于加载json
-        streaming=False, sample_size=100: 用于在线加载
-        pdf_paths:List[str]=None: 用于加载pdf
-        legalbench: Union[str, List[str]]=None: 用于加载legalbench
-        pubmedqa: Union[str, List[str]]=None: 用于加载pubmedqa
-        buffer_size=3, threshold_type="percentile", sentence_split_regex=r"(?<=[.?!])\s+": 用于语义分割
         incremental=True: 是否增量构建
         """
-        docs = []
-        if streaming:
-            # 在线读取数据集
-            docs.extend(self._streaming_load_dataset(sample_size))
-        elif folder_path is not None:
-            # 从指定文件夹加载JSON文件
-            docs.extend(self._load_json_folder(folder_path, start, step))
-        elif pdf_paths is not None:
-            # 从PDF文件加载
-            docs.extend(self._read_pdfs(pdf_paths))
-        elif legalbench is not None:
-            # 加载legalbench
-            docs.extend(self._load_legalbench(tasks=tasks))
-        elif pubmedqa is not None:
-            # 加载pubmedqa
-            docs.extend(self._load_pubmedqa(data_files=pubmedqa))
-        
-
         # 支持增量构建：如已有索引，先加载
         if incremental and os.path.exists(self.vectorstore_path):
             self.load_vectorstore()
@@ -293,18 +271,29 @@ class Client:
             for c in chunks:
                 # 再使用SemanticChunker分块
                 semantic_chunk = self._semantic_chunk_docs([Document(page_content=c)], 
-                                                           buffer_size, threshold_type, sentence_split_regex)
+                                                            buffer_size=buffer_size, breakpoint_threshold_type=threshold_type,
+                                                            sentence_split_regex=sentence_split_regex)
                 print(f"Total chunks after semantic split: {len(semantic_chunk)}")
                 # 用merged进行后续处理
                 for i, d in enumerate(semantic_chunk):
                     texts.append(d.page_content)
                     metadatas.append({
+                        #用来保存wiki数据集
                         "source": doc.metadata.get("source", ""),
                         "doc_id": doc.metadata.get("doc_id", ""),
                         #用来保存legalbench中的信息
-                        'task': doc.metadata.get("task", ""),
-                        'idx': doc.metadata.get("idx", ""),
-                        'answer':doc.metadata.get("answer", "")
+                        # 'task': doc.metadata.get("task", ""),
+                        # 'idx': doc.metadata.get("idx", ""),
+                        # 'answer':doc.metadata.get("answer", ""),
+                        #用来保存pubmedqa 
+                        # 'long_answer': doc.metadata.get("long_answer",""),
+                        # 'meshes': doc.metadata.get("meshes",""),
+                        #用来保存codesearch
+                        "repo": doc.metadata.get("repository_name",""),
+                        "func": doc.metadata.get("func_name",""),
+                        "path": doc.metadata.get("func_path_in_repository",""),
+                        "language": doc.metadata.get("language",""),
+                        "url": doc.metadata.get("func_code_url","")
                     })
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
