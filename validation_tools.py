@@ -1,5 +1,6 @@
 from datasets import load_dataset
 import re
+import string
 
 # 工具函数
 
@@ -10,45 +11,102 @@ import re
     # load_dataset("rajpurkar/squad", None, "validation"),
     # load_dataset("stanfordnlp/web_questions", None, "test"),
     # load_dataset("cais/mmlu", "all", "validation"),
-    # load_dataset("wics/strategy-qa", None, split="train"),
+    # load_dataset("wics/strategy-qa", None, split="test"),
     # load_dataset("hotpot_qa", "distractor", "validation", trust_remote_code=True)
 # }
-def load_sampled_dataset(name, config=None, split="validation", sample_size=100):
-    try:
-        ds = load_dataset(name, config, split=split, streaming=True)
-    except Exception:
-        # 如果 validation split 不存在，用 test
-        ds = load_dataset(name, config, split="test", streaming=True)
-    
-    sampled = []
-    for i, example in enumerate(ds):
-        if i >= sample_size:
-            break
-        sampled.append(example)
-    print(f"Loaded {len(sampled)} samples from {name} ({split})")
-    return sampled
+def get_question_answer(dataset_name, sample):
+    # 提取question和gold answers
+    if dataset_name == "trivia_qa":
+        return get_trivia_qa(sample)
+    elif dataset_name == "natural_questions":
+        return get_natural_questions(sample)
+    elif dataset_name == "strategy_qa":
+        return get_strategyqa(sample)
+    elif dataset_name =="mmlu":
+        return get_mmlu(sample)
+    elif dataset_name == "web_questions":
+        return get_web_questions(sample)
+    else:
+        return get_squad(sample)
 
-def normalize_text(s: str):
-    """小写，去标点，去多余空格"""
-    s = s.lower()
-    s = re.sub(r"[^a-z0-9\s]", "", s)
-    return " ".join(s.split())
+def normalize_answer(s: str) -> str:
+    """
+    参考 SQuAD 官方评测脚本实现：
+        转成小写
+        去除英文冠词（a, an, the）
+        去除标点符号
+        合并多余空格
+    """
 
-def compute_prf(pred: str, golds: list[str]):
+    def lower(text: str) -> str:
+        return text.lower()
+
+    def remove_articles(text: str) -> str:
+        # \b 表示单词边界，确保只去掉独立的 a/an/the
+        return re.sub(r'\b(a|an|the)\b', ' ', text)
+
+    def remove_punc(text: str) -> str:
+        # 利用 string.punctuation 列表去除所有英文标点
+        return ''.join(ch for ch in text if ch not in set(string.punctuation))
+
+    def white_space_fix(text: str) -> str:
+        # 将多个空白字符合并为一个，并去掉两端空格
+        return ' '.join(text.split())
+
+    # 按顺序执行各步
+    text = s
+    text = lower(text)
+    text = remove_articles(text)
+    text = remove_punc(text)
+    text = white_space_fix(text)
+    return text
+
+def compute_score(answer: str, gold_list: list[str]):
     """
     对每个 gold answer 计算 token 级别的 P/R/F1，返回最高的那组值
     """
-    pred_tokens = normalize_text(pred).split()
+    # 将参考答案统一为列表形式
+    if isinstance(gold_list, str):
+        gold_list = [gold_list]
+    
+    # 归一化预测答案（小写化、去标点和冠词等）
+    pred_norm = normalize_answer(answer)
+    gold_norms = [normalize_answer(g) for g in gold_list]
+    
+    # 检测是否为选择题
+    is_choice = False
+    # 单字符选项（如 'A','B','C'）
+    if all(re.fullmatch(r"[a-z0-9]", g) for g in gold_norms):
+        is_choice = True
+    # 二元选项（如 'true','false'）
+    if set(gold_norms) <= {"true", "false"}:
+        is_choice = True
+
+    if is_choice:
+        # 任一参考答案相同即视为完全正确
+        if pred_norm in gold_norms:
+            return 1.0, 1.0, 1.0
+        else:
+            return 0.0, 0.0, 0.0
+    
+    # 否则则是简答题
+    pred_tokens = pred_norm.split()
+    if not pred_tokens:
+        return 0.0, 0.0, 0.0
     best_p = best_r = best_f1 = 0.0
 
-    for g in golds:
-        gold_tokens = normalize_text(g).split()
-        if not pred_tokens or not gold_tokens:
+    for g in gold_norms:
+        gold_tokens = normalize_answer(g).split()
+        if len(gold_tokens) == 0:
             continue
-        common = len(set(pred_tokens) & set(gold_tokens))
-        p = common / len(pred_tokens)
-        r = common / len(gold_tokens)
-        f1 = 2*p*r/(p+r) if (p+r)>0 else 0.0
+
+        common_tokens = len(set(pred_tokens) & set(gold_tokens))
+        if common_tokens == 0:
+            p = r = f1 = 0
+        else:
+            p = common_tokens / len(pred_tokens)
+            r = common_tokens / len(gold_tokens)
+            f1 = 2 * p * r / (p + r)
         best_p = max(best_p, p)
         best_r = max(best_r, r)
         best_f1 = max(best_f1, f1)
@@ -102,7 +160,8 @@ def get_squad(sample):
     if "context" in sample:
         context = sample["conetxt"]
         background = f"Read the context and answer the question by returning the exact answer span from the context.\n Conetxt: {context}" 
-
+    print(f"Question background: {background}")
+    
     if "answers" in sample:
         gold_answers = sample["answers"].get('text', [])
     elif "answer" in sample:
@@ -136,32 +195,35 @@ def get_mmlu(sample):
     ''' 
     从 MMLU 数据集中提取问题和答案。
     '''
-    if "question" in sample:
-        question = sample["question"]
-    else:
-        raise KeyError("无法在样本中找到 question 字段")
+    question = sample["question"]
     print(f"Processing question: {question}")
 
     choices = sample["choices"]
-    options = "\n".join([f"{chr(65+i)}. {c}" for i, c in enumerate(choices)])
-    background = f"Choices:\n{options}\n\nWhich one is correct?"
-
-    if "answer" in sample:
-        gold_answers = sample["answer"]
-    elif "answers" in sample:
-        gold_answers = sample["answers"]
-    else:
-        gold_answers = []
+    options = "\n".join([f"{i}. {c}" for i, c in enumerate(choices)])
+    background = f"Choices:\n{options}\n\nWhich one is correct?\nThis is a multiple-choice question. You must choose the correct answer from the options 1, 2, 3, or 4. \
+    Answer with only the number of the correct choice. Do not explain your answer or include any additional text. Just reply with: 1, 2, 3, or 4"
+    
+    print(f"Question background: {background}")
+    
+    gold_answers = sample["answer"]
     print(f"Gold answers: {gold_answers}")
-    return background, question, gold_answers
+    return background, question, str(gold_answers)
 
 def get_strategyqa(sample):
     # 拼接 question + description
     question = sample.get("question", "").strip()
     desc = sample.get("description", "").strip()
-    background = f"Please answer with either True or False only.\n Background: {desc}\n"
+    background = f"This is a true or false question. Please answer with either True or False. Do not provide any explanation or extra words. \
+    Only reply with: True or False\n Background: {desc}\n"
     print(f"Processing question: {question}")
+    print(f"Question background: {background}")
 
-    gold_answer = str(sample["answer"])
+    gold_answer = sample["answer"]
     print(f"Gold answer: {gold_answer}")
-    return background, question, gold_answer
+    return background, question, str(gold_answer)
+
+def get_human_qa(sample):
+    question = sample.get('question', "")
+    answer = sample.get('answer')
+    context = sample.get('conetxt', "")
+    return question, answer, context

@@ -26,9 +26,9 @@ class Proof():
         self.document = document
         self.vector = vector
         self.score = score
-        self.pedersen_id
-        self.groth_id
-        self.pog_id
+        self.pedersen_id = 0
+        self.groth_id = 0
+        self.pog_id = 0
 
 
 # # 自定义 LangChain 的 Embeddings 类封装
@@ -343,7 +343,7 @@ class Client:
         )
         print(f"Vectorstore {self.vectorstore_path} loaded.")
 
-    def retrieve(self, query:str, top_k=4):
+    def retrieve(self, query:str, top_k=4, fetch_k: int = None):
         """
         通过query在FAISS向量库中检索k个最相似文档，
         返回每个Document对象、其特征向量及相似度得分
@@ -352,26 +352,31 @@ class Client:
         if self.db is None:
             raise ValueError("Vectorstore尚未加载，请先调用load_vectorstore或build_vectorstore")
         
-        # 查询向量并归一化
+        # 获取查询向量（HuggingFaceEmbeddings 已归一化输出）
         query_vec = np.array(self.embeddings.embed_query(query), dtype=np.float32)
-        query_norm = query_vec / np.linalg.norm(query_vec)
 
-        # 使用 FAISS 内积搜索（等价于余弦相似度）
-        scores, indices = self.db.index.search(query_norm.reshape(1, -1), top_k)
+        # 决定 fetch_k 大小，保证过滤后还能拿到 top_k
+        if fetch_k is None:
+            fetch_k = top_k * 5
 
+        # 一次性用内积搜索 fetch_k 个候选（等价于余弦相似度）
+        scores, indices = self.db.index.search(query_vec.reshape(1, -1), fetch_k)
+
+        # 过滤掉过短文档，并截取前 top_k 个
         results = []
-        for i, idx in enumerate(indices[0]):
-            if idx == -1:
+        for score, idx in zip(scores[0], indices[0]):
+            if idx < 0:
                 continue
             doc_id = self.db.index_to_docstore_id[idx]
             doc = self.db.docstore.search(doc_id)
+            if len(doc.page_content) < 20:
+                continue
+            vec = self.db.index.reconstruct(int(idx)).tolist()
+            results.append(Proof(doc, vec, float(score)))
+            if len(results) >= top_k:
+                break
 
-            faiss_index = int(idx)
-            vec = self.db.index.reconstruct(faiss_index).tolist()
-            score = float(scores[0][i])  # 余弦相似度
-            results.append(Proof(doc, vec, score))
-        
-        return results, query_norm.tolist()
+        return results, query_vec.tolist()
 
 if __name__ == "__main__":
     # 示例：创建Client并加载向量存储

@@ -14,7 +14,7 @@ class PrivacyProofAPI:
             }
         """
         url = f"{self.base_url}/gen_pedersen_merkle_proof"
-        payload = {"name": name, "K": K, "Q": Q, "data": data}
+        payload = {"client_id": name, "K": K, "Q": Q, "data": data}
         return self._post(url, payload)
 
     def gen_groth_proof(self, name, K, Q, data):
@@ -26,7 +26,7 @@ class PrivacyProofAPI:
             }
         """
         url = f"{self.base_url}/gen_groth_merkle_proof"
-        payload = {"name": name, "K": K, "Q": Q, "data": data}
+        payload = {"client_id": name, "K": K, "Q": Q, "data": data}
         return self._post(url, payload)
 
     def verify_pedersen_proof(self, proof_id):

@@ -3,6 +3,7 @@ import pandas as pd
 from client import Client
 from server import Server
 import validation_tools
+from server_algo import Server_with_Algorithm, Cost_Algorithm
 
 def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[],
                                 output_csv: str = "trivia_qa_results.csv", dataset_name:str = "trivia_qa"): 
@@ -16,53 +17,70 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
     """
     results = []
     for idx, sample in enumerate(samples):
-        # 提取question和gold answers
-        if dataset_name == "trivia_qa":
-            question, gold_answers = validation_tools.get_trivia_qa(sample)
-        elif dataset_name == "natural_questions":
-            question, gold_answers = validation_tools.get_natural_questions(sample)
-        elif dataset_name == "squad":
-            question, gold_answers = validation_tools.get_squad(sample)
-        elif dataset_name =="mmlu":
-            question, gold_answers = validation_tools.get_mmlu(sample)
-        elif dataset_name == "strategy_qa":
-            question, gold_answers = validation_tools.get_strategyqa(sample)
-        else:
-            question, gold_answers = validation_tools.get_web_questions(sample)
+        background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
 
         # 调用 LLM Server
-        latency, answer = server.multi_client_generate(question, clients, top_k)
-
-        # 构造 SQuAD 格式输入
-        prediction = [{"id": str(idx), "prediction_text": answer}]
-        reference  = [{"id": str(idx), "answers": {"text": gold_answers, "answer_start": [0]}}]
-
-        # 计算 EM 和 F1
-        # 加载指标
-        metric_qa = load_metric("squad")
-        qa_metrics = metric_qa.compute(predictions=prediction, references=reference)
-        em_score = qa_metrics["exact_match"]
-        f1_score = qa_metrics["f1"]
+        retrieve_latency, generate_latency, answer = server.multi_client_generate(background, question, clients, top_k)
 
         # 计算自定义 P/R/F1  
-        precision, recall, pr_f1 = validation_tools.compute_prf(answer, gold_answers)
+        precision, recall, f1_score = validation_tools.compute_score(answer, gold_answers)
 
         results.append({
             "question": question,
             "gold_answers": gold_answers,
             "answer": answer,
-            "exact_match": em_score,
-            "squad_f1": f1_score,
             "precision": precision,
             "recall": recall,
-            "pr_f1": pr_f1, # 自定义的F1分数
-            "latency": latency
+            "f1_score": f1_score,
+            "retrieve_latency": retrieve_latency,
+            "generate_latency": generate_latency
         })
 
         if idx % 10 == 0:
-            print(f"[{idx}] EM={em_score}, F1={f1_score:.2f}, P={precision:.2f}, R={recall:.2f}, latency={latency:.2f}s")
+            print(f"[{idx}] F1={f1_score:.2f}, P={precision:.2f}, R={recall:.2f}")
 
     # 保存到 CSV
     df = pd.DataFrame(results)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"Saved Natural Questions results to {output_csv}")
+
+def datasets_costs(clients: list[Client], server: Server_with_Algorithm, top_k=5, samples=[],
+                                output_csv: str = "trivia_qa_costs.csv", dataset_name:str = "trivia_qa"): 
+    """
+    clients: 创建的多个client
+    server: 用于生成的server
+    samples: 先加载数据集为dataset
+    output_csv: 保存的文件名
+    dataset_name: 数据集的名称("trivia_qa", "natural_questions", "squad", "mmlu",
+                             "strategy_qa", "web_questions", "hot_qa")
+    """
+    costs = []
+    for idx, sample in enumerate(samples):
+        background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
+
+        # 调用 LLM Server
+        cost, answer = server.multi_client_generate(background, question, clients, top_k)
+
+        costs.append({
+            "idx": idx,
+            "retrieval_time": cost.retrieval_time,
+            "por_proof_time": cost.por_proof_time,
+            "por_verify_time": cost.por_verify_time,
+            "por_proof_size": cost.por_proof_size,
+            "generation_time": cost.generation_time,
+            "pog_proof_time": cost.pog_proof_time,
+            "pog_verify_time": cost.pog_verify_time,
+            "pog_proof_size": cost.pog_proof_size,
+        })
+
+        if idx % 10 == 0:
+            print(f"[{idx}] retrieval_time={cost.retrieval_time:.5f}, por_proof_time={cost.por_proof_time:.5f}, \
+                  por_verify_time={cost.por_verify_time:.5f}, por_proof_size={cost.por_proof_size:.5f}, \
+                    generation_time={cost.generation_time:.5f}, pog_proof_time={cost.pog_proof_time:.5f}, \
+                        pog_verify_time={cost.pog_verify_time:.5f}, pog_proof_size={cost.pog_proof_size:.5f}")
+
+    # 保存到 CSV
+    df = pd.DataFrame(costs)
+    df.to_csv(output_csv, index=False, encoding="utf-8-sig")
+    print(f"Saved Natural Questions results to {output_csv}")
+
