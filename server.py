@@ -17,7 +17,7 @@ class Server:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://17164778.r9.cpolar.top"):
+    def __init__(self, model_name: str = "qwen3:4b", base_url="http://1d087351.r9.cpolar.top"):
         self.llm = ChatOllama(model=model_name)
         self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
 

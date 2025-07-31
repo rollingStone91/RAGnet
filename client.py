@@ -22,14 +22,13 @@ import glob
 import gzip
 
 class Proof():
-    def __init__(self, document: Document, vector: List[np.ndarray], score: float,
-                  pedersen_id=None, groth_id=None, pog_id=None):
+    def __init__(self, document: Document, vector: List[np.ndarray]=[], score: float=0):
         self.document = document
         self.vector = vector
         self.score = score
-        self.pedersen_id = pedersen_id
-        self.groth_id = groth_id
-        self.pog_id = pog_id
+        self.pedersen_id
+        self.groth_id
+        self.pog_id
 
 
 # # 自定义 LangChain 的 Embeddings 类封装
@@ -250,7 +249,7 @@ class Client:
                         print(f"Error parsing line {i} in {file}: {e}")
         return docs
     
-    def build_vectorstore(self, batch_size=10, docs:List[Document]=[],                             
+    def build_vectorstore(self, batch_size=5, docs:List[Document]=[],                             
                         buffer_size=3, threshold_type="percentile",
                         sentence_split_regex=r"(?<=[.?!])\s+", incremental=True):
         """
@@ -265,6 +264,7 @@ class Client:
         # 构建 FAISS
         texts, metadatas = [], []
         for j, doc in enumerate(docs):
+            # try:    
             # 为了避免显存爆炸，首先对文档进行字符切块
             chunks = self._chunk_text(doc.page_content)
             print(f"Total chunks after Character split: {len(chunks)}")
@@ -281,19 +281,19 @@ class Client:
                         #用来保存wiki数据集
                         "source": doc.metadata.get("source", ""),
                         "doc_id": doc.metadata.get("doc_id", ""),
-                        #用来保存legalbench中的信息
-                        # 'task': doc.metadata.get("task", ""),
-                        # 'idx': doc.metadata.get("idx", ""),
-                        # 'answer':doc.metadata.get("answer", ""),
-                        #用来保存pubmedqa 
-                        # 'long_answer': doc.metadata.get("long_answer",""),
-                        # 'meshes': doc.metadata.get("meshes",""),
-                        #用来保存codesearch
-                        # "repo": doc.metadata.get("repository_name",""),
-                        # "func": doc.metadata.get("func_name",""),
-                        # "path": doc.metadata.get("func_path_in_repository",""),
-                        # "language": doc.metadata.get("language",""),
-                        # "url": doc.metadata.get("func_code_url","")
+                            #用来保存legalbench中的信息
+                            # 'task': doc.metadata.get("task", ""),
+                            # 'idx': doc.metadata.get("idx", ""),
+                            # 'answer':doc.metadata.get("answer", ""),
+                            #用来保存pubmedqa 
+                            # 'long_answer': doc.metadata.get("long_answer",""),
+                            # 'meshes': doc.metadata.get("meshes",""),
+                            #用来保存codesearch
+                            # "repo": doc.metadata.get("repository_name",""),
+                            # "func": doc.metadata.get("func_name",""),
+                            # "path": doc.metadata.get("func_path_in_repository",""),
+                            # "language": doc.metadata.get("language",""),
+                            # "url": doc.metadata.get("func_code_url","")
                     })
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
@@ -313,6 +313,16 @@ class Client:
                 torch.cuda.synchronize()
             print(f"Inserted batch up to docs {j+1}/{len(docs)}")
 
+            # except RuntimeError as e:
+            #     if "out of memory" in str(e):
+            #         # 保存已处理的部分到FAISS
+            #         self.db.save_local(self.vectorstore_path)
+            #         print(f"保存了{j}个doc文件到向量数据库中")
+            #         if torch.cuda.is_available():
+            #             torch.cuda.empty_cache()
+            #             torch.cuda.synchronize()
+            #         raise e  # 可选，或者直接终止程序
+        
         # 保存向量库
         if self.db:
             self.db.save_local(self.vectorstore_path)

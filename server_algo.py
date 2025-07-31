@@ -10,6 +10,18 @@ import json
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.schema import HumanMessage, SystemMessage
 
+class Cost_Algorithm:
+    def __init__(self, start):
+        self.start = start
+        self.retrieval_time = 0
+        self.por_proof_time = 0
+        self.por_verify_time = 0 
+        self.por_proof_size = 0
+        self.generation_time = 0
+        self.pog_proof_time = 0
+        self.pog_verify_time = 0
+        self.pog_proof_size = 0
+
 
 class Server_with_Algorithm:
     """
@@ -32,6 +44,8 @@ class Server_with_Algorithm:
         proofs, q_vec = await asyncio.get_event_loop().run_in_executor(
             None, client.retrieve, query, top_k
         )
+        self.cost.retrieval_time = time.time() - self.cost.start
+
         # 使用pedersen算法
         for p in proofs:
             response = self.proof_api.gen_pedersen_proof(name=client.vectorstore_path,
@@ -40,6 +54,8 @@ class Server_with_Algorithm:
             response = json.loads(response)
             p.pedersen_id = response["proof_id"]
             print(f"gen pedersen proof:{response}")
+            self.cost.por_proof_size += response["space_cost"]
+            self.cost.por_proof_time += response["time_cost"]
         return proofs, q_vec
 
     def build_prompt(self, query: str, contexts: List[str], metadatas) -> str:
@@ -95,6 +111,7 @@ class Server_with_Algorithm:
         contexts = []
         metadatas = []
         # 验证proof
+        proof_len = len(proofs)
         for p in proofs:
             # 取出文本并embed
             data = p.document.page_content
@@ -103,19 +120,32 @@ class Server_with_Algorithm:
             res = self.proof_api.gen_pog(q_vec, k, data)
             res = json.loads(res)
             p.pog_id = res["proof_id"]
+            self.cost.pog_proof_time += res["time_cost"]
+            self.cost.pog_proof_size += res["space_cost"]
+
             # 验证proof
             msg = self.proof_api.verify_pog(p.pedersen_id, p.pog_id)
             msg = json.loads(msg)
+            self.cost.pog_verify_time += res["time_cost"]
             # 验证通过则加入列表
             if(msg == "ok"):
                 contexts.append(data)
                 metadatas.append(p.document.metadata)
+        
+        # 计算平均值
+        self.cost.pog_proof_time = self.cost.pog_proof_time / proof_len
+        self.cost.pog_proof_size = self.cost.pog_proof_size / proof_len
+        self.cost.pog_verify_time = self.cost.pog_verify_time / proof_len
 
         print(f"contexts: {contexts}") 
         print(f"metadatas: {metadatas}")
 
         prompt = self.build_prompt(query, contexts, metadatas)
+        
+        self.cost.start = time.time()
         response = self.llm.invoke(prompt)
+        self.cost.generation_time = time.time() - self.cost.start
+
         answer = self.clean_answer(response)
         print(f"answer:{answer}")
         return answer
@@ -125,11 +155,16 @@ class Server_with_Algorithm:
         多客户端检索，返回答案和相关文档
         """
         # RAG 检索 + LLM 生成 
-        start = time.time()
+        self.cost = Cost_Algorithm(time.time())
 
         # 并行检索
         tasks = [self._retrieve_from_client(c, query, top_k) for c in clients]
         all_results = await asyncio.wait_for(asyncio.gather(*tasks), timeout)
+
+        # 计算平均时间
+        proof_len = top_k * len(clients)
+        self.cost.por_proof_size = self.cost.por_proof_size / proof_len
+        self.cost.por_proof_time = self.cost.por_proof_size / proof_len
 
         results = [
         {"client": c, "proofs": proofs, "q_vec": q_vec}
@@ -146,9 +181,11 @@ class Server_with_Algorithm:
                 response = self.proof_api.verify_pedersen_proof(proof_id=p.pedersen_id)
                 response = json.loads(response)
                 print(f"verify pedersen proof:{response}")
+                self.cost.por_verify_time += response["time_cost"]
                 if(response['msg'] == "ok"):
                     all_proofs.append(p)
-            
+        self.cost.por_verify_time = self.cost.por_verify_time / proof_len
+
         # 根据得分进行排序，选出最优proofs
         all_proofs.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
 
@@ -157,7 +194,6 @@ class Server_with_Algorithm:
         
         #生成答案并清洗
         answer = self.generate_answer(query=query, q_vec=q_vecs[0], proofs=selected)
-        latency = time.time() - start
 
-        return latency, answer
+        return self.cost, answer
     
