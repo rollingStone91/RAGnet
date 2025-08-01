@@ -118,9 +118,9 @@ class Server_with_Algorithm:
         # print(f"cleaned answer: {cleaned}")
 
         # 从 LLM 回复中提取 'Final Answer' 后的内容
-        # match = re.search(r"Answer[:\s]*(.*)", cleaned, flags=re.IGNORECASE) 
-        # if match:
-        #     return match.group(1).strip()
+        match = re.search(r"Answer[:\s]*(.*)", cleaned, flags=re.IGNORECASE) 
+        if match:
+            return match.group(1).strip()
         return cleaned.strip()
     
     def generate_answer(self, background:str, query: str, q_vec, proofs) -> str:

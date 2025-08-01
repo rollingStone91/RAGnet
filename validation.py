@@ -45,7 +45,7 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
     print(f"Saved Natural Questions results to {output_csv}")
 
 def datasets_costs(clients: list[Client], server: Server_with_Algorithm, top_k=5, samples=[],
-                                output_csv: str = "trivia_qa_costs.csv", dataset_name:str = "trivia_qa"): 
+                                output_csv: str = "trivia_qa_costs.csv"): 
     """
     clients: 创建的多个client
     server: 用于生成的server
@@ -56,8 +56,13 @@ def datasets_costs(clients: list[Client], server: Server_with_Algorithm, top_k=5
     """
     costs = []
     for idx, sample in enumerate(samples):
-        background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
-
+        question = sample["question"]
+        background = f"Generate exactly 3 distinct answers that can all be verified from the document and\
+the answers MUST be directly found or clearly derivable from the provided document content.\n Context: {sample['context']}"
+        
+        print(f"Processing question: {question}")
+        print(f"Background: {sample['context']}")
+        print(f"Gold_Answer: {sample['answer']}")
         # 调用 LLM Server
         cost, answer = server.multi_client_generate(background, question, clients, top_k)
 
