@@ -20,7 +20,7 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
         background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
 
         # 调用 LLM Server
-        retrieve_latency, generate_latency, answer = server.multi_client_generate(background, question, clients, top_k)
+        retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate(background, question, clients, top_k)
 
         # 计算自定义 P/R/F1  
         precision, recall, f1_score = validation_tools.compute_score(answer, gold_answers)
@@ -84,3 +84,33 @@ def datasets_costs(clients: list[Client], server: Server_with_Algorithm, top_k=5
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
     print(f"Saved Natural Questions results to {output_csv}")
 
+def evaluate_hit_rate(clients: list[Client], server: Server, top_k=5, samples=[], similarity_threshold=0.85,
+                      output_csv: str = "semi_professional_baseline_topk_5.csv"):
+    hit_rates = []
+    for idx, sample in enumerate(samples):
+        question = sample["question"]
+        print(f"Processing question: {question}")
+        print(f"Background: {sample['context']}")
+        print(f"Gold_Answer: {sample['answer']}")
+
+        # 调用 LLM Server
+        retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate("", question, clients, top_k)
+
+        hit, exact_match = validation_tools.compute_hit(answer, sample['answer'], sample['context'], contexts, similarity_threshold)
+
+        hit_rates.append({
+            "idx": idx,
+            "question_id": sample['id'],
+            "hit": hit,
+            "exact_match": exact_match,
+            "retrieve_latency": retrieve_latency,
+            "generate_latency": generate_latency
+        })
+
+        if idx % 10 == 0:
+            print(f"[{idx}] hit={hit}, exact_match={exact_match}")
+
+    # 保存到 CSV
+    df = pd.DataFrame(hit_rates)
+    df.to_csv(output_csv, index=False, encoding="utf-8-sig")
+    print(f"Saved Natural Questions results to {output_csv}")

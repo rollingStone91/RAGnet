@@ -113,7 +113,7 @@ class Server:
         # 请求对应client提供真实上下文
         contexts = [r.document.page_content for r in selected]
         metadatas = [r.document.metadata for r in selected]
-        scores = [r.score for r in selected]
+        # scores = [r.score for r in selected]
         # print(f"contexts: {contexts}") 
         # print(f"metadatas: {metadatas}")
         # print(f"scores: {scores}")
@@ -123,5 +123,5 @@ class Server:
         answer = self.generate_answer(background, query, contexts, metadatas)
         generate_latency = time.time() - start
 
-        return retrieve_latency, generate_latency, answer
+        return retrieve_latency, generate_latency, contexts, answer
     

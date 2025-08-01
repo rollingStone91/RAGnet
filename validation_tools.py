@@ -1,6 +1,8 @@
-from datasets import load_dataset
 import re
 import string
+from typing import List, Dict, Any
+import difflib
+from bs4 import BeautifulSoup
 
 # 工具函数
 
@@ -68,6 +70,11 @@ def compute_score(answer: str, gold_list: list[str]):
     # 将参考答案统一为列表形式
     if isinstance(gold_list, str):
         gold_list = [gold_list]
+    if gold_list == []:
+        if answer in ["", "I don’t know", "no answer", "not found", "I don’t know.", "n/a"]: 
+            return 1.0, 1.0, 1.0
+        else:
+            return 0.0, 0.0, 0.0
     
     # 归一化预测答案（小写化、去标点和冠词等）
     pred_norm = normalize_answer(answer)
@@ -113,17 +120,39 @@ def compute_score(answer: str, gold_list: list[str]):
 
     return best_p, best_r, best_f1
 
+def strip_html(html: str) -> str:
+    """简单地把 HTML 去标签，保留可读文字。"""
+    return BeautifulSoup(html, "html.parser").get_text(separator=" ")
+
 def get_natural_questions(sample):
     '''
     从 Natural Questions 数据集中提取问题和答案。
     '''
     question = sample["question"]["text"]
     print(f"Processing question: {question}")
-    gold_answers = sample.get("answers", {}).get("text", [])
+
+    # 这里直接用整个 HTML 内容去标签后的文本
+    html = sample["document"]["html"]
+    background = f"Read the following context carefully. \
+        Do not explain your answer or include any additional text, \
+            answer the question using **only** a span (exact phrase) from the context.\n Context: {strip_html(html)}" 
+    # print(f"Question background: {background}")
+
+    # 提取 short_answers
+    ann = sample["annotations"]
+    short_ans = ann.get("short_answers", [])
+
+    gold_answers = []
+    if short_ans:
+        for sa in short_ans:
+            gold_answers.extend(sa["text"])
+    else:
+        # 没有 short_answers 时 fallback 到 long_answer
+        long_ans = ann.get("long_answer", {})
+        if long_ans and long_ans.get("start_byte", -1) >= 0:
+            start, end = long_ans ["start_byte"], long_ans ["end_byte"]
+            gold_answers = [strip_html(html[start:end])]
     print(f"Gold answers: {gold_answers}")
-    if not gold_answers:
-        gold_answers = [""]  # 占位
-    background = ""
     return background, question, gold_answers
 
 def get_trivia_qa(sample):
@@ -151,23 +180,16 @@ def get_squad(sample):
     从 SQuAD 数据集中提取问题和答案。
     hotqa也可以使用这个方法
     '''
-    if "question" in sample:
-        question = sample["question"]
-    else:
-        raise KeyError("无法在样本中找到 question 字段")
+    question = sample["question"]
     print(f"Processing question: {question}")
 
-    if "context" in sample:
-        context = sample["conetxt"]
-        background = f"Read the context and answer the question by returning the exact answer span from the context.\n Conetxt: {context}" 
+    context = sample.get('context')
+    background = f"Read the following context carefully. \
+        Do not explain your answer or include any additional text, \
+            answer the question using **only** a span (exact phrase) from the context.\n Context: {context}" 
     print(f"Question background: {background}")
     
-    if "answers" in sample:
-        gold_answers = sample["answers"].get('text', [])
-    elif "answer" in sample:
-        gold_answers = sample["answer"]
-    else:
-        gold_answers = []
+    gold_answers = sample["answers"].get('text', [])
     print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
@@ -222,8 +244,24 @@ def get_strategyqa(sample):
     print(f"Gold answer: {gold_answer}")
     return background, question, str(gold_answer)
 
-def get_human_qa(sample):
-    question = sample.get('question', "")
-    answer = sample.get('answer')
-    context = sample.get('conetxt', "")
-    return question, answer, context
+def exact_match(ans: str, gold_ans: List[str]) -> bool:
+    ans_norm = normalize_answer(ans)
+    return any(ans_norm in normalize_answer(g) for g in gold_ans)
+
+# === 语义匹配函数（基于简单字符串相似度，实际部署可替换为向量相似度）===
+def semantic_match(ans: str, gold_ans: List[str], threshold: float = 0.85) -> bool:
+    ans_norm = normalize_answer(ans)
+    for g in gold_ans:
+        g_norm = normalize_answer(g)
+        ratio = difflib.SequenceMatcher(None, ans_norm, g_norm).ratio()
+        if ratio >= threshold:
+            return True
+    return False
+
+def compute_hit(answer:str, gold_answer:List[str], context:str, contexts:List[str], threshold: float = 0.85):
+    hit = exact_match(answer, gold_answer)
+    if not hit:
+        hit = semantic_match(answer, gold_answer, threshold)
+
+    em = exact_match(context, contexts)
+    return hit, em
