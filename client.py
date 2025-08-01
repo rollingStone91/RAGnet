@@ -21,7 +21,7 @@ import pandas as pd
 import glob
 import gzip
 from langchain.embeddings.base import Embeddings
-from modelscope import LLM, PoolingParams
+# from modelscope import LLM, PoolingParams
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray]=[], score: float=0):
@@ -32,24 +32,25 @@ class Proof():
         self.groth_id = 0
         self.pog_id = 0
 
-class QwenCustomEmbeddings(Embeddings):
-    def __init__(self, dim=512, device="cuda", model_path="./models/qwen3-embedding-0.6b"):
+class CustomDimensionEmbeddings(Embeddings):
+    """
+    自定义维度的Embedding包装类，支持截取前N维
+    """
+    def __init__(self, embeddings: Embeddings, dim: int = None):
+        self.embeddings = embeddings
         self.dim = dim
-        self.model = LLM(
-            model=model_path,
-            task="embed",
-            device=device,
-            hf_overrides={"is_matryoshka": True}
-        )
-
-    def embed_documents(self, texts):
-        outputs = self.model.embed(
-            texts, pooling_params=PoolingParams(dimensions=self.dim, normalize=True)
-        )
-        return [out.outputs.embedding for out in outputs]
-
-    def embed_query(self, text):
-        return self.embed_documents([text])[0]
+    
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        embeddings = self.embeddings.embed_documents(texts)
+        if self.dim is not None:
+            embeddings = [emb[:self.dim] for emb in embeddings]
+        return embeddings
+    
+    def embed_query(self, text: str) -> List[float]:
+        embedding = self.embeddings.embed_query(text)
+        if self.dim is not None:
+            embedding = embedding[:self.dim]
+        return embedding
     
 class Client:
     """
@@ -59,13 +60,14 @@ class Client:
                 vectorstore_path: str = "faiss_db", MIN_LEN = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
-        if dim == 1024:
-            self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
+        embeddings = HuggingFaceEmbeddings(model_name=model_path,
                                                 model_kwargs={"device": "cuda"},
                                                 encode_kwargs={"normalize_embeddings": True},)
                                                 # multi_process=True)
+        if dim == 1024:
+            self.embeddings = embeddings
         else:
-            self.embeddings = QwenCustomEmbeddings(dim=512, model_path=model_path)
+            self.embeddings = CustomDimensionEmbeddings(embeddings, dim)
             
         self.db: FAISS = None
         self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
