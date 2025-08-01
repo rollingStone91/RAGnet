@@ -31,7 +31,7 @@ class Server_with_Algorithm:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://439fdd8d.r16.vip.cpolar.cn", 
+    def __init__(self, model_name: str = "qwen3:4b", base_url="http://2b895c11.r9.cpolar.top", 
                   model_path: str = "./models/qwen3-embedding-0.6b"):
         self.llm = ChatOllama(model=model_name)
         self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
@@ -171,7 +171,7 @@ class Server_with_Algorithm:
         print(f"answer:{answer}")
         return answer
     
-    def multi_client_generate(self, background:str, query:str, clients: List[Client], top_k=5, dim:int = 1024):
+    def multi_client_generate(self, background:str, query:str, clients: List[Client], top_k=5):
         """
         多客户端检索，返回答案和相关文档
         """
@@ -195,7 +195,7 @@ class Server_with_Algorithm:
             print(f"verify pedersen proof:{response}")
             if(response['msg'] == "ok"):
                 verified_proof.append(p)
-                self.cost.por_verify_time += response["time_cost"]
+            self.cost.por_verify_time += response["time_cost"]
         self.cost.por_verify_time = self.cost.por_verify_time / proof_len
 
         # 根据得分进行排序，选出最优proofs
