@@ -28,8 +28,10 @@ def get_question_answer(dataset_name, sample):
         return get_mmlu(sample)
     elif dataset_name == "web_questions":
         return get_web_questions(sample)
-    else:
+    elif dataset_name == "squad":
         return get_squad(sample)
+    elif dataset_name == "hot_qa":
+        return get_hot_pot(sample)
 
 def normalize_answer(s: str) -> str:
     """
@@ -161,8 +163,6 @@ def get_trivia_qa(sample):
     '''
     if "question" in sample:
         question = sample["question"]
-    elif "query" in sample:
-        question = sample["query"]
     else:
         raise KeyError("无法在样本中找到 question 字段")
     print(f"Processing question: {question}")
@@ -190,6 +190,20 @@ def get_squad(sample):
     print(f"Question background: {background}")
     
     gold_answers = sample["answers"].get('text', [])
+    print(f"Gold answers: {gold_answers}")
+    return background, question, gold_answers
+
+def get_hot_pot(sample):
+    question = sample["question"]
+    print(f"Processing question: {question}")
+
+    context = sample.get('context')
+    background = f"Read the following context carefully. \
+        Do not explain your answer or include any additional text, \
+            answer the question using **only** a span (exact phrase) from the context.\n Context: {context}" 
+    print(f"Question background: {background}")
+    
+    gold_answers = sample["answer"]
     print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 

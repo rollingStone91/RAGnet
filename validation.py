@@ -89,12 +89,15 @@ def evaluate_hit_rate(clients: list[Client], server: Server, top_k=5, samples=[]
     hit_rates = []
     for idx, sample in enumerate(samples):
         question = sample["question"]
+        background = f"Generate exactly 3 distinct answers that can all be verified from the document and\
+the answers MUST be directly found or clearly derivable from the provided document content.\n Context: {sample['context']}"
+        
         print(f"Processing question: {question}")
         print(f"Background: {sample['context']}")
         print(f"Gold_Answer: {sample['answer']}")
 
         # 调用 LLM Server
-        retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate("", question, clients, top_k)
+        retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate(background, question, clients, top_k)
 
         hit, exact_match = validation_tools.compute_hit(answer, sample['answer'], sample['context'], contexts, similarity_threshold)
 

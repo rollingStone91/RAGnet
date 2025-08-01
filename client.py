@@ -20,6 +20,8 @@ from langchain.embeddings.base import Embeddings
 import pandas as pd
 import glob
 import gzip
+from langchain.embeddings.base import Embeddings
+from modelscope import LLM, PoolingParams
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray]=[], score: float=0):
@@ -30,40 +32,41 @@ class Proof():
         self.groth_id = 0
         self.pog_id = 0
 
+class QwenCustomEmbeddings(Embeddings):
+    def __init__(self, dim=512, device="cuda", model_path="./models/qwen3-embedding-0.6b"):
+        self.dim = dim
+        self.model = LLM(
+            model=model_path,
+            task="embed",
+            device=device,
+            hf_overrides={"is_matryoshka": True}
+        )
 
-# # 自定义 LangChain 的 Embeddings 类封装
-# class LlamaCppEmbeddings(Embeddings):
-#     def __init__(self, model_path: str):
-#         self.llm = Llama(model_path=model_path, embedding=True)
+    def embed_documents(self, texts):
+        outputs = self.model.embed(
+            texts, pooling_params=PoolingParams(dimensions=self.dim, normalize=True)
+        )
+        return [out.outputs.embedding for out in outputs]
 
-#     def embed_documents(self, texts: list[str]):
-#         # return [self.llm.embed(text)["data"][0]["embedding"] for text in texts]
-#         embeddings = []
-#         for text in texts:
-#             result = self.llm.embed(text)
-#             if isinstance(result, list) and isinstance(result[0], list):
-#                 embeddings.append(result[0])
-#             else:
-#                 embeddings.append(result)
-#         return embeddings
-
-#     def embed_query(self, text):
-#         # return self.llm.embed(text)["data"][0]["embedding"]
-#         result = self.llm.embed(text)
-#         return result[0] if isinstance(result, list) and isinstance(result[0], list) else result
+    def embed_query(self, text):
+        return self.embed_documents([text])[0]
     
 class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", 
+    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", dim=1024,
                 vectorstore_path: str = "faiss_db", MIN_LEN = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
-        self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
+        if dim == 1024:
+            self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
                                                 model_kwargs={"device": "cuda"},
                                                 encode_kwargs={"normalize_embeddings": True},)
                                                 # multi_process=True)
+        else:
+            self.embeddings = QwenCustomEmbeddings(dim=512, model_path=model_path)
+            
         self.db: FAISS = None
         self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
         # self.embeddings = DashScopeEmbeddings(
