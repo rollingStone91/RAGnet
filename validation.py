@@ -39,6 +39,7 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
         if idx % 10 == 0:
             print(f"[{idx}] F1={f1_score:.2f}, P={precision:.2f}, R={recall:.2f}")
 
+
     # 保存到 CSV
     df = pd.DataFrame(results)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
@@ -83,7 +84,6 @@ the answers MUST be directly found or clearly derivable from the provided docume
                   por_verify_time={cost.por_verify_time:.5f}, por_proof_size={cost.por_proof_size:.5f}, \
                     generation_time={cost.generation_time:.5f}, pog_proof_time={cost.pog_proof_time:.5f}, \
                         pog_verify_time={cost.pog_verify_time:.5f}, pog_proof_size={cost.pog_proof_size:.5f}")
-
     # 保存到 CSV
     df = pd.DataFrame(costs)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")

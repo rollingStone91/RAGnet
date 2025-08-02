@@ -273,9 +273,9 @@ def semantic_match(ans: str, gold_ans: List[str], threshold: float = 0.85) -> bo
     return False
 
 def compute_hit(answer:str, gold_answer:List[str], context:str, contexts:List[str], threshold: float = 0.85):
-    hit = exact_match(answer, gold_answer)
+    em = exact_match(answer, gold_answer)
+    
+    hit = exact_match(context, contexts)
     if not hit:
-        hit = semantic_match(answer, gold_answer, threshold)
-
-    em = exact_match(context, contexts)
+        hit = semantic_match(context, contexts, threshold)
     return hit, em

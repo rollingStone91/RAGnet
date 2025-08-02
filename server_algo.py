@@ -140,6 +140,7 @@ class Server_with_Algorithm:
             p.pog_id = res["proof_id"]
             self.cost.pog_proof_time += res["time_cost"]
             self.cost.pog_proof_size += res["space_cost"]
+            print(f"gen pog:{res}")
 
             # 验证proof
             msg = self.proof_api.verify_pog(p.pedersen_id, p.pog_id)
@@ -150,13 +151,18 @@ class Server_with_Algorithm:
             if(msg['msg'] == "ok"):
                 contexts.append(data)
                 metadatas.append(p.document.metadata)
-                self.cost.pog_verify_time += res["time_cost"]
+            self.cost.pog_verify_time += msg["time_cost"]
         
         proof_len = len(contexts) if len(contexts) > 0 else 1
         # 计算平均值
         self.cost.pog_proof_time = self.cost.pog_proof_time / proof_len
+        print(f"average pog time: {self.cost.pog_proof_time}")
+
         self.cost.pog_proof_size = self.cost.pog_proof_size / proof_len
+        print(f"average pog size: {self.cost.pog_proof_size}")
+
         self.cost.pog_verify_time = self.cost.pog_verify_time / proof_len
+        print(f"average pog verify time: {self.cost.pog_verify_time}")
 
         # print(f"contexts: {contexts}") 
         # print(f"metadatas: {metadatas}")
@@ -183,9 +189,10 @@ class Server_with_Algorithm:
         # 计算平均时间
         proof_len = top_k * len(clients)
         self.cost.por_proof_size = self.cost.por_proof_size / proof_len
-        self.cost.por_proof_time = self.cost.por_proof_size / proof_len
-        
-        # print(f"q_vecs: {q_vec}")
+        print(f"average por proof size: {self.cost.por_proof_size}")
+
+        self.cost.por_proof_time = self.cost.por_proof_time / proof_len
+        print(f"average por proof time: {self.cost.por_proof_time}")
 
         verified_proof = []
         # flatten proofs
@@ -197,6 +204,7 @@ class Server_with_Algorithm:
                 verified_proof.append(p)
             self.cost.por_verify_time += response["time_cost"]
         self.cost.por_verify_time = self.cost.por_verify_time / proof_len
+        print(f"average por verify_time: {self.cost.por_verify_time}")
 
         # 根据得分进行排序，选出最优proofs
         verified_proof.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
