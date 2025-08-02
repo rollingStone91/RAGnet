@@ -260,7 +260,7 @@ def get_strategyqa(sample):
 
 def exact_match(ans: str, gold_ans: List[str]) -> bool:
     ans_norm = normalize_answer(ans)
-    return any(ans_norm in normalize_answer(g) for g in gold_ans)
+    return any(normalize_answer(g) in ans_norm for g in gold_ans)
 
 # === 语义匹配函数（基于简单字符串相似度，实际部署可替换为向量相似度）===
 def semantic_match(ans: str, gold_ans: List[str], threshold: float = 0.85) -> bool:
