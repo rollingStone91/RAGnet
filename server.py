@@ -2,13 +2,23 @@ from typing import List, Tuple, Dict
 from langchain.chat_models import ChatOllama
 from langchain.schema import Document
 from client import Client
-import asyncio
 import time
 import re
-from privacy_proof import PrivacyProofAPI
 import json
 from langchain.schema import HumanMessage, SystemMessage
+import logging
+from datetime import datetime
 
+# ====== 日志配置 ======
+log_filename = f"./logs/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.INFO,  # DEBUG 级别会记录更多细节
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(log_filename, encoding="utf-8"),  # 保存到文件
+        logging.StreamHandler()  # 同时输出到控制台
+    ]
+)
 
 class Server:
     """
@@ -17,9 +27,8 @@ class Server:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://439fdd8d.r16.vip.cpolar.cn"):
+    def __init__(self, model_name: str = "qwen3:4b"):
         self.llm = ChatOllama(model=model_name)
-        self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
 
     def _retrieve_from_clients(self, clients, query: str, top_k: int):
         proofs = []
@@ -75,7 +84,8 @@ class Server:
         去除 <think> 标签和其中的内容，并去掉多余空白
         """
         # 去掉所有 <think>…</think> 区段
-        print(f"uncleaned answer: {raw}")
+        # print(f"uncleaned answer: {raw}")
+        logging.info(f"未处理过的模型生成答案: {raw}")
         cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
         # print(f"cleaned answer: {cleaned}")
 
@@ -104,7 +114,6 @@ class Server:
         retrieve_latency = time.time() - start
 
         # print(f"q_vec: {q_vec}")
-
             
         # 根据得分进行排序，选出最优proofs
         all_proofs.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
@@ -114,6 +123,11 @@ class Server:
         # 请求对应client提供真实上下文
         contexts = [r.document.page_content for r in selected]
         metadatas = [r.document.metadata for r in selected]
+
+        logging.info(f"正在处理的问题:{query}")
+        for i, r in enumerate(selected):
+            logging.info(f"选中的第{i+1}个上下文: {r.document.page_content}")
+
         # scores = [r.score for r in selected]
         # print(f"contexts: {contexts}") 
         # print(f"metadatas: {metadatas}")

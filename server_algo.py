@@ -8,6 +8,7 @@ import re
 from privacy_proof import PrivacyProofAPI
 import json
 from langchain.embeddings import HuggingFaceEmbeddings
+from client import QwenEmbeddings
 from langchain.schema import HumanMessage, SystemMessage
 import numpy as np
 
@@ -31,13 +32,14 @@ class Server_with_Algorithm:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://2b895c11.r9.cpolar.top", 
+    def __init__(self, model_name: str = "qwen3:4b", base_url="http://4a7bdf20.r8.cpolar.cn", 
                   model_path: str = "./models/qwen3-embedding-0.6b"):
         self.llm = ChatOllama(model=model_name)
         self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
-        self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
-                                                model_kwargs={"device": "cuda"},
-                                                encode_kwargs={"normalize_embeddings": True},)
+        self.embeddings = QwenEmbeddings(model_name=model_path, device="cuda", batch_size=8)
+        # self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
+        #                                         model_kwargs={"device": "cuda"},
+        #                                         encode_kwargs={"normalize_embeddings": True},)
                                                 # multi_process=True)
 
     def _retrieve_from_clients(self, clients, query: str, top_k: int):

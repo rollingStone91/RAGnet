@@ -3,7 +3,8 @@ import pandas as pd
 from client import Client
 from server import Server
 import validation_tools
-from server_algo import Server_with_Algorithm, Cost_Algorithm
+from server_algo import Server_with_Algorithm
+
 
 def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[],
                                 output_csv: str = "trivia_qa_results.csv", dataset_name:str = "trivia_qa"): 

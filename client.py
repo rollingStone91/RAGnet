@@ -10,7 +10,6 @@ from langchain_community.embeddings import DashScopeEmbeddings
 from datasets import load_dataset
 from langchain.schema import Document
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain.embeddings import HuggingFaceEmbeddings
 import numpy as np
 import json
 # from llama_cpp import Llama
@@ -20,7 +19,10 @@ from langchain.embeddings.base import Embeddings
 import pandas as pd
 import glob
 import gzip
-from langchain.embeddings.base import Embeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+import torch.nn.functional as F
+from sentence_transformers import SentenceTransformer
+
 # from modelscope import LLM, PoolingParams
 
 class Proof():
@@ -32,45 +34,63 @@ class Proof():
         self.groth_id = 0
         self.pog_id = 0
 
-class CustomDimensionEmbeddings(Embeddings):
+class QwenEmbeddings(Embeddings):
     """
     自定义维度的Embedding包装类，支持截取前N维
     """
-    def __init__(self, embeddings: Embeddings, dim: int = None):
-        self.embeddings = embeddings
-        self.dim = dim
+    def __init__(self, model_name="./models/qwen3-embedding-4b", device="cuda", batch_size=8):
+        self.device = device
+        self.model = SentenceTransformer(
+                                model_name,
+                                model_kwargs={
+                                    # "torch_dtype": torch.float16, 
+                                    # "attn_implementation": "flash_attention_2", 
+                                    "device_map": self.device},
+                                # tokenizer_kwargs={"padding_side": "left"},
+                                trust_remote_code=True)
+        self.batch_size = batch_size
+
+    def embed_documents(self, texts):
+        # batch encode 文本列表，返回二维numpy数组
+        embeddings = self.model.encode(texts, batch_size=self.batch_size, convert_to_numpy=True, normalize_embeddings=True)
+        return embeddings.tolist()
+
+    def embed_query(self, text):
+        # encode 单个文本，返回list形式
+        embedding = self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True, prompt_name="query")
+        return embedding.tolist()
+
+    # def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    #     embeddings = self.embeddings.embed_documents(texts)
+    #     if self.dim is not None:
+    #         embeddings = [emb[:self.dim] for emb in embeddings]
+    #     return embeddings
     
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        embeddings = self.embeddings.embed_documents(texts)
-        if self.dim is not None:
-            embeddings = [emb[:self.dim] for emb in embeddings]
-        return embeddings
-    
-    def embed_query(self, text: str) -> List[float]:
-        embedding = self.embeddings.embed_query(text)
-        if self.dim is not None:
-            embedding = embedding[:self.dim]
-        return embedding
-    
+    # def embed_query(self, text: str) -> List[float]:
+    #     embedding = self.embeddings.embed_query(text)
+    #     if self.dim is not None:
+    #         embedding = embedding[:self.dim]
+    #     return embedding
+
+
 class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", dim=1024,
+    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", device="cuda",
                 vectorstore_path: str = "faiss_db", MIN_LEN = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
-        embeddings = HuggingFaceEmbeddings(model_name=model_path,
-                                                model_kwargs={"device": "cuda"},
-                                                encode_kwargs={"normalize_embeddings": True},)
-                                                # multi_process=True)
-        if dim == 1024:
-            self.embeddings = embeddings
-        else:
-            self.embeddings = CustomDimensionEmbeddings(embeddings, dim)
-            
+        self.embeddings = QwenEmbeddings(model_name=model_path, device=device, batch_size=8)
         self.db: FAISS = None
         self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
+
+        # embeddings = HuggingFaceEmbeddings( model_name=model_path,
+        #                                     model_kwargs={"device": "cuda"},
+        #                                     encode_kwargs={"normalize_embeddings": True,
+        #                                                     "batch_size": 8,})
+        #                                     # multi_process=True)
+
         # self.embeddings = DashScopeEmbeddings(
         #     model="text-embedding-v1",
         #     dashscope_api_key=dashscope_api_key
@@ -254,7 +274,7 @@ class Client:
                         print(f"Error parsing line {i} in {file}: {e}")
         return docs
     
-    def build_vectorstore(self, batch_size=5, docs:List[Document]=[],                             
+    def build_vectorstore(self, batch_size=8, docs:List[Document]=[], dataset_name='wiki',                             
                         buffer_size=3, threshold_type="percentile",
                         sentence_split_regex=r"(?<=[.?!])\s+", incremental=True):
         """
@@ -282,24 +302,51 @@ class Client:
                 # 用merged进行后续处理
                 for i, d in enumerate(semantic_chunk):
                     texts.append(d.page_content)
-                    metadatas.append({
-                        #用来保存wiki数据集
-                        "source": doc.metadata.get("source", ""),
-                        "doc_id": doc.metadata.get("doc_id", ""),
-                            #用来保存legalbench中的信息
-                            # 'task': doc.metadata.get("task", ""),
-                            # 'idx': doc.metadata.get("idx", ""),
-                            # 'answer':doc.metadata.get("answer", ""),
-                            #用来保存pubmedqa 
-                            # 'long_answer': doc.metadata.get("long_answer",""),
-                            # 'meshes': doc.metadata.get("meshes",""),
+                    if(dataset_name == "wiki"):
+                        metadatas.append({
+                            #用来保存wiki数据集
+                            "source": doc.metadata.get("source", ""),
+                            "doc_id": doc.metadata.get("doc_id", ""),
+                            })
+                    elif dataset_name == "pubmedqa":
+                        metadatas.append({
+                            #用来保存pubmedqa数据集
+                            "source": doc.metadata.get("source", ""),
+                            "doc_id": doc.metadata.get("doc_id", ""),
+                            "answer": doc.metadata.get("answer", ""),
+                            "long_answer": doc.metadata.get("long_answer", ""),
+                            "meshes": doc.metadata.get("meshes", []),
+                        })
+                    elif dataset_name == "legalbench":
+                        metadatas.append({
+                            #用来保存legalbench数据集
+                            'source': doc.metadata.get("source", ""),
+                            'task': doc.metadata.get("task", ""),
+                            'idx': doc.metadata.get("idx", ""),
+                            'answer': doc.metadata.get("answer", ""),
+                        })  
+                    elif dataset_name == "codesearchnet":
+                        metadatas.append({
                             #用来保存codesearch
-                            # "repo": doc.metadata.get("repository_name",""),
-                            # "func": doc.metadata.get("func_name",""),
-                            # "path": doc.metadata.get("func_path_in_repository",""),
-                            # "language": doc.metadata.get("language",""),
-                            # "url": doc.metadata.get("func_code_url","")
-                    })
+                            "source": doc.metadata.get("source", ""),
+                            "repo": doc.metadata.get("repository_name",""),
+                            "func": doc.metadata.get("func_name",""),
+                            "path": doc.metadata.get("func_path_in_repository",""),
+                            "language": doc.metadata.get("language",""),
+                            "url": doc.metadata.get("func_code_url","")
+                        })
+                    elif dataset_name == "arxiv":
+                        metadatas.append({
+                            # 用来保存arxiv数据集
+                            'id': doc.metadata.get("id"),
+                            'submitter': doc.metadata.get('submitter'),
+                            'authors': doc.metadata.get('authors'),
+                            'categories': doc.metadata.get('categories'),
+                            "doi": doc.metadata.get("doi"),
+                            "journal_ref": doc.metadata.get("journal-ref"),
+                            "comments": doc.metadata.get("comments"),
+                        })
+                    
                     if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
                         if self.db is None:
                             self.db = FAISS.from_texts(
@@ -317,17 +364,6 @@ class Client:
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             print(f"Inserted batch up to docs {j+1}/{len(docs)}")
-
-            # except RuntimeError as e:
-            #     if "out of memory" in str(e):
-            #         # 保存已处理的部分到FAISS
-            #         self.db.save_local(self.vectorstore_path)
-            #         print(f"保存了{j}个doc文件到向量数据库中")
-            #         if torch.cuda.is_available():
-            #             torch.cuda.empty_cache()
-            #             torch.cuda.synchronize()
-            #         raise e  # 可选，或者直接终止程序
-        
         # 保存向量库
         if self.db:
             self.db.save_local(self.vectorstore_path)
@@ -358,7 +394,8 @@ class Client:
             raise ValueError("Vectorstore尚未加载，请先调用load_vectorstore或build_vectorstore")
         
         # 获取查询向量（HuggingFaceEmbeddings 已归一化输出）
-        query_vec = np.array(self.embeddings.embed_query(query), dtype=np.float32)
+        q_vec = self.embeddings.embed_query(query)
+        query_vec = np.array(q_vec, dtype=np.float32)
 
         # 决定 fetch_k 大小，保证过滤后还能拿到 top_k
         if fetch_k is None:
@@ -381,7 +418,7 @@ class Client:
             if len(results) >= top_k:
                 break
 
-        return results, query_vec.tolist()
+        return results, q_vec
 
 if __name__ == "__main__":
     # 示例：创建Client并加载向量存储
