@@ -2,7 +2,6 @@ import os
 from langchain_community.document_loaders import PyPDFLoader
 from typing import List, Tuple, Dict, Union
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores import FAISS
 from langchain.tools.retriever import create_retriever_tool
 from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -20,8 +19,8 @@ import pandas as pd
 import glob
 import gzip
 from langchain_community.embeddings import HuggingFaceEmbeddings
-import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
+import re
 
 # from modelscope import LLM, PoolingParams
 
@@ -38,7 +37,7 @@ class QwenEmbeddings(Embeddings):
     """
     自定义维度的Embedding包装类，支持截取前N维
     """
-    def __init__(self, model_name="./models/qwen3-embedding-4b", device="cuda", batch_size=8):
+    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=8):
         self.device = device
         self.model = SentenceTransformer(
                                 model_name,
@@ -77,13 +76,12 @@ class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, model_path: str = "./models/qwen3-embedding-0.6b", device="cuda",
-                vectorstore_path: str = "faiss_db", MIN_LEN = 50): # dashscope_api_key: str,使用api调用embedding模型
+    def __init__(self, embedding, vectorstore_path: str = "faiss_db", min_len = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
-        self.embeddings = QwenEmbeddings(model_name=model_path, device=device, batch_size=8)
+        self.embeddings = embedding
         self.db: FAISS = None
-        self.MIN_LEN = MIN_LEN  # 低于这个字符数的块，认为过短
+        self.min_len = min_len  # 低于这个字符数的块，认为过短
 
         # embeddings = HuggingFaceEmbeddings( model_name=model_path,
         #                                     model_kwargs={"device": "cuda"},
@@ -96,58 +94,6 @@ class Client:
         #     dashscope_api_key=dashscope_api_key
         # )
         # self.embeddings = LlamaCppEmbeddings(model_path=model_path)
-
-    def _merge_short_chunks(self, chunks: List[str]) -> List[str]:
-        """
-        合并过短块（< MIN_LEN），避免出现无意义内容。
-        """
-        merged_chunks = []
-        for c in chunks:
-            if len(c) < self.MIN_LEN:
-                if merged_chunks:
-                    merged_chunks[-1] += " " + c  # 合并到前一个块
-                else:
-                    merged_chunks.append(c)  # 第一个块直接保留
-            else:
-                merged_chunks.append(c)
-        # 再进行一次筛选，直接舍去合并后长度仍旧太小的块
-        merged_chunks = [c.strip() for c in merged_chunks if len(c.strip()) > 20]
-        return merged_chunks
-
-    def _chunk_text(self, text: str, chunk_size=4000, overlap= 200) -> list[str]:
-        """
-        将文本分块处理，使用递归字符分割器。
-        """
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=overlap,
-            separators=["\n\n", "\n", " ", ""],
-            length_function=len
-        )
-        chunks = splitter.split_text(text)
-        # 过滤空块或纯符号块
-        chunks = [c.strip() for c in chunks if len(c.strip()) > 0]
-        return self._merge_short_chunks(chunks)
-    
-    def _semantic_chunk_docs(self, docs: list[Document],
-                             buffer_size=3,
-                             breakpoint_threshold_type="percentile",
-                             sentence_split_regex=r"(?<=[.?!])\s+") -> list[Document]:
-        """
-        使用语义分块器对文档进行分块处理。
-        """
-        splitter = SemanticChunker(
-            embeddings=self.embeddings,
-            buffer_size=buffer_size,
-            breakpoint_threshold_type=breakpoint_threshold_type,
-            sentence_split_regex=sentence_split_regex
-        )
-        chunks = splitter.split_documents(docs)
-
-        # 过滤空块并合并短块
-        texts = [d.page_content.strip() for d in chunks if len(d.page_content.strip()) > 0]
-        merged = self._merge_short_chunks(texts)
-        return [Document(page_content=text) for text in merged]
     
     # 读取PDF文件并提取文本内容
     def _read_pdfs(self, pdf_paths: List[str]) -> List[Document]:
@@ -273,13 +219,113 @@ class Client:
                     except Exception as e:
                         print(f"Error parsing line {i} in {file}: {e}")
         return docs
+
+    def _merge_short_chunks(self, chunks: List[str]) -> List[str]:
+        """
+        更稳健的短块合并逻辑：
+        - 将长度 < min_len 的块优先合并到前一个块；若不存在前一个块，则合并到下一个块。
+        - 合并完成后剔除依然过短（<=20）或只含标点/空白的块。
+        - 保证不会无限增长（如需可在外层再根据 max_chunk_size 切分）。
+        """
+        merged = []
+        for chunk in chunks:
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            if len(chunk) < self.min_len:
+                # 尝试合并到前一个
+                if merged:
+                    merged[-1] = (merged[-1] + " " + chunk).strip()
+                else:
+                    # 暂时保存到 merged 以便下一次循环可以合并
+                    merged.append(chunk)
+            else:
+                merged.append(chunk)
+
+        # 如果第一个仍然很短且后面存在，则把它合并到第二个
+        if len(merged) >= 2 and len(merged[0]) < self.min_len:
+            merged[1] = (merged[0] + " " + merged[1]).strip()
+            merged.pop(0)
+
+        # 最终过滤掉过短或无效块
+        cleaned = [c for c in merged if len(c.strip()) > 20 and not re.fullmatch(r"\W+", c)]
+        return cleaned
+
+    def _chunk_text(self, text, chunk_size = 8000, overlap = 400,
+                    semantic_max = 2000,
+                    buffer_size = 3, breakpoint_type = "percentile", sentence_split_regex = r"(?<=[.?!])\s+"):
+        """
+        两阶段切分（coarse->semantic）策略：
+        1) 先用较大的递归字符切分器把文档切为较大的窗（coarse_chunk_size），以减少对SemanticChunker的调用次数（节省计算和显存）。
+        2) 对于较长的coarse chunk，再用SemanticChunker做语义切分，得到更精细、语义自洽的块。
+        3) 合并过短块，并返回字符串列表。
+        """
+        # 预清理：合并多余空白
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # 粗切分（大窗）
+        coarse_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=overlap,
+            separators=["\n\n", "\n", " ", "", "."],
+            length_function=len,
+        )
+        coarse_chunks = coarse_splitter.split_text(text)
+
+        out_chunks = []
+
+        # 对每个coarse chunk决定是否需要semantic切分
+        for c in coarse_chunks:
+            c = c.strip()
+            if not c:
+                continue
+            # 若长度小于semantic_max，直接作为候选（避免不必要的语义切分）
+            if len(c) <= semantic_max:
+                out_chunks.append(c)
+                continue
+
+            # 否则调用 SemanticChunker 进行语义级切分（减少语义切分次数）
+            splitter = SemanticChunker(
+                embeddings=self.embeddings,
+                buffer_size=buffer_size,
+                breakpoint_threshold_type=breakpoint_type,
+                sentence_split_regex=sentence_split_regex,
+            )
+            docs = [Document(page_content=c)]
+            sem_chunks = splitter.split_documents(docs)
+
+            # 提取文本并合并短块
+            texts = [d.page_content.strip() for d in sem_chunks if d.page_content.strip()]
+            merged = self._merge_short_chunks(texts)
+            out_chunks.extend(merged)
+
+        # 最终清洗：去重、过滤、并返回
+        # 使用简单去重保持顺序
+        seen = set()
+        final_chunks = []
+        for chunk in out_chunks:
+            key = chunk[:200]  # 截取开头作为快速去重的hash
+            if key in seen:
+                continue
+            seen.add(key)
+            final_chunks.append(chunk)
+        return final_chunks
     
-    def build_vectorstore(self, batch_size=8, docs:List[Document]=[], dataset_name='wiki',                             
-                        buffer_size=3, threshold_type="percentile",
-                        sentence_split_regex=r"(?<=[.?!])\s+", incremental=True):
+    def iter_doc_chunks(self, doc: Document, chunk_size = 8000, overlap: int = 400,
+                        semantic_max = 2000, **semantic_kwargs):
+        """
+        将单篇文档流式化为Document块的生成器，便于分批嵌入与索引。
+        """
+        text = doc.page_content or ""
+        chunks = self._chunk_text(text, chunk_size=chunk_size, overlap=overlap, semantic_max=semantic_max,
+                                  **semantic_kwargs)
+        for ch in chunks:
+            yield Document(page_content=ch, metadata=doc.metadata)
+    
+    def build_vectorstore(self, docs:List[Document], batch_size=8, incremental=True):
         """
         构建向量数据库
-        batch_size:10批处理大小
+        batch_size: 批处理大小
         incremental=True: 是否增量构建
         """
         # 支持增量构建：如已有索引，先加载
@@ -287,83 +333,30 @@ class Client:
             self.load_vectorstore()
 
         # 构建 FAISS
-        texts, metadatas = [], []
-        for j, doc in enumerate(docs):
-            # try:    
-            # 为了避免显存爆炸，首先对文档进行字符切块
-            chunks = self._chunk_text(doc.page_content)
-            print(f"Total chunks after Character split: {len(chunks)}")
-            for c in chunks:
-                # 再使用SemanticChunker分块
-                semantic_chunk = self._semantic_chunk_docs([Document(page_content=c)], 
-                                                            buffer_size=buffer_size, breakpoint_threshold_type=threshold_type,
-                                                            sentence_split_regex=sentence_split_regex)
-                print(f"Total chunks after semantic split: {len(semantic_chunk)}")
-                # 用merged进行后续处理
-                for i, d in enumerate(semantic_chunk):
-                    texts.append(d.page_content)
-                    if(dataset_name == "wiki"):
-                        metadatas.append({
-                            #用来保存wiki数据集
-                            "source": doc.metadata.get("source", ""),
-                            "doc_id": doc.metadata.get("doc_id", ""),
-                            })
-                    elif dataset_name == "pubmedqa":
-                        metadatas.append({
-                            #用来保存pubmedqa数据集
-                            "source": doc.metadata.get("source", ""),
-                            "doc_id": doc.metadata.get("doc_id", ""),
-                            "answer": doc.metadata.get("answer", ""),
-                            "long_answer": doc.metadata.get("long_answer", ""),
-                            "meshes": doc.metadata.get("meshes", []),
-                        })
-                    elif dataset_name == "legalbench":
-                        metadatas.append({
-                            #用来保存legalbench数据集
-                            'source': doc.metadata.get("source", ""),
-                            'task': doc.metadata.get("task", ""),
-                            'idx': doc.metadata.get("idx", ""),
-                            'answer': doc.metadata.get("answer", ""),
-                        })  
-                    elif dataset_name == "codesearchnet":
-                        metadatas.append({
-                            #用来保存codesearch
-                            "source": doc.metadata.get("source", ""),
-                            "repo": doc.metadata.get("repository_name",""),
-                            "func": doc.metadata.get("func_name",""),
-                            "path": doc.metadata.get("func_path_in_repository",""),
-                            "language": doc.metadata.get("language",""),
-                            "url": doc.metadata.get("func_code_url","")
-                        })
-                    elif dataset_name == "arxiv":
-                        metadatas.append({
-                            # 用来保存arxiv数据集
-                            'id': doc.metadata.get("id"),
-                            'submitter': doc.metadata.get('submitter'),
-                            'authors': doc.metadata.get('authors'),
-                            'categories': doc.metadata.get('categories'),
-                            "doi": doc.metadata.get("doi"),
-                            "journal_ref": doc.metadata.get("journal-ref"),
-                            "comments": doc.metadata.get("comments"),
-                        })
-                    
-                    if len(texts) >= batch_size or i == len(semantic_chunk) - 1:
-                        if self.db is None:
-                            self.db = FAISS.from_texts(
-                                texts,
-                                embedding=self.embeddings,
-                                metadatas=metadatas
-                            )
-                        else:
-                            self.db.add_texts(texts, metadatas=metadatas)
-                        texts.clear()
-                        metadatas.clear()
-                        print(f"Inserted batch up to merged chunk {i+1}/{len(semantic_chunk)}")
+        for i, doc in enumerate(docs):
+            texts_batch, metadatas_batch = [], []
+
+            for chunk_doc in self.iter_doc_chunks(doc):
+                texts_batch.append(chunk_doc.page_content)
+                metadatas_batch.append(chunk_doc.metadata)
+                if len(texts_batch) >= batch_size:
+                    if self.db is None:
+                        self.db = FAISS.from_texts(
+                                    texts_batch,
+                                    embedding=self.embeddings,
+                                    metadatas=metadatas_batch
+                                )
+                    else:
+                        self.db.add_texts(texts_batch, metadatas=metadatas_batch)
+                    texts_batch.clear()
+                    metadatas_batch.clear()
+
             # 清理缓存，避免显存累积
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
-            print(f"Inserted batch up to docs {j+1}/{len(docs)}")
+            print(f"Inserted batch up to docs {i+1}/{len(docs)}")
+
         # 保存向量库
         if self.db:
             self.db.save_local(self.vectorstore_path)

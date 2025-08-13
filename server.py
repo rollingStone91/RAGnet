@@ -124,7 +124,7 @@ class Server:
         contexts = [r.document.page_content for r in selected]
         metadatas = [r.document.metadata for r in selected]
 
-        logging.info(f"正在处理的问题:{query}")
+        
         for i, r in enumerate(selected):
             logging.info(f"选中的第{i+1}个上下文: {r.document.page_content}")
 

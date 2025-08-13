@@ -4,6 +4,7 @@ from client import Client
 from server import Server
 import validation_tools
 from server_algo import Server_with_Algorithm
+import logging
 
 
 def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[],
@@ -19,6 +20,9 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
     results = []
     for idx, sample in enumerate(samples):
         background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
+
+        logging.info(f"正在处理的问题:{question}")
+        logging.info(f"标准答案: {gold_answers}")
 
         # 调用 LLM Server
         retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate(background, question, clients, top_k)

@@ -24,7 +24,6 @@ class Cost_Algorithm:
         self.pog_verify_time = 0
         self.pog_proof_size = 0
 
-
 class Server_with_Algorithm:
     """
     Server 类，负责：
@@ -32,11 +31,10 @@ class Server_with_Algorithm:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:4b", base_url="http://4a7bdf20.r8.cpolar.cn", 
-                  model_path: str = "./models/qwen3-embedding-0.6b"):
+    def __init__(self, embedding, model_name: str = "qwen3:4b", base_url="http://4a7bdf20.r8.cpolar.cn"):
         self.llm = ChatOllama(model=model_name)
         self.proof_api = PrivacyProofAPI(base_url=base_url)  # Optional: PrivacyProofAPI 实例
-        self.embeddings = QwenEmbeddings(model_name=model_path, device="cuda", batch_size=8)
+        self.embeddings = embedding
         # self.embeddings = HuggingFaceEmbeddings(model_name=model_path,
         #                                         model_kwargs={"device": "cuda"},
         #                                         encode_kwargs={"normalize_embeddings": True},)
