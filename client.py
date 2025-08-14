@@ -332,10 +332,9 @@ class Client:
         if incremental and os.path.exists(self.vectorstore_path):
             self.load_vectorstore()
 
+        texts_batch, metadatas_batch = [], []
         # 构建 FAISS
         for i, doc in enumerate(docs):
-            texts_batch, metadatas_batch = [], []
-
             for chunk_doc in self.iter_doc_chunks(doc):
                 texts_batch.append(chunk_doc.page_content)
                 metadatas_batch.append(chunk_doc.metadata)
