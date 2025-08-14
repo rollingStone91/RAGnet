@@ -347,13 +347,13 @@ class Client:
                                 )
                     else:
                         self.db.add_texts(texts_batch, metadatas=metadatas_batch)
+                    
                     texts_batch.clear()
                     metadatas_batch.clear()
-
-            # 清理缓存，避免显存累积
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
+                    # 清理缓存，避免显存累积
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
             print(f"Inserted batch up to docs {i+1}/{len(docs)}")
 
         # 保存向量库
