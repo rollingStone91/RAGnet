@@ -73,7 +73,7 @@ def compute_score(answer: str, gold_list: list[str]):
     if isinstance(gold_list, str):
         gold_list = [gold_list]
     if gold_list == []:
-        if answer in ["", "I don’t know", "no answer", "not found", "I don’t know.", "n/a"]: 
+        if answer in ["", "I don't know", "no answer", "not found", "I don't know.", "n/a"]: 
             return 1.0, 1.0, 1.0
         else:
             return 0.0, 0.0, 0.0
@@ -135,9 +135,25 @@ def get_natural_questions(sample):
 
     # 这里直接用整个 HTML 内容去标签后的文本
     html = sample["document"]["html"]
-    background = f"Read the following context carefully. \
-        Do not explain your answer or include any additional text, \
-            answer the question using **only** a span (exact phrase) from the context.\n Context: {strip_html(html)}" 
+    background = {}
+    background["Instruction"] = f"[Task Instruction: Natural Questions]\
+- These questions are open-domain, often requiring Wikipedia-style factual answers.\
+- Ensure conciseness and focus only on the central fact.\
+- If the question is ambiguous, clarify the scope explicitly before answering.\
+- Answer the question using a span (exact phrase) from the html context.\
+html: {strip_html(html)}"
+    
+    background["fewshot"] = f"### Example (NaturalQuestions)\
+Question: When was the Eiffel Tower completed?\
+Contexts:\
+[Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.\
+<think>\
+Step 1 - Rephrase: Determine the year Eiffel Tower construction was finished.\
+Step 2 - Timeline: Construction period 1887-1889.\
+Step 3 - Context check: Context 1 confirms the completion year.\
+</think>\
+Answer: 1889"
+    
     # print(f"Question background: {background}")
 
     # 提取 short_answers
@@ -150,10 +166,18 @@ def get_natural_questions(sample):
             gold_answers.extend(sa["text"])
     else:
         # 没有 short_answers 时 fallback 到 long_answer
-        long_ans = ann.get("long_answer", {})
-        if long_ans and long_ans.get("start_byte", -1) >= 0:
-            start, end = long_ans ["start_byte"], long_ans ["end_byte"]
-            gold_answers = [strip_html(html[start:end])]
+        long_ans = ann.get("long_answer", [])
+        for la in long_ans:
+            if la.get("candidate_index", -1) >= 0 and la.get("start_byte", -1) >= 0:
+                start, end = la ["start_byte"], la ["end_byte"]
+                gold_answers.append(strip_html(html[start:end]))
+    if len(gold_answers) == 0:
+        yes_no_answer = ann.get("yes_no_answer", [])
+        for g in yes_no_answer:
+            if g == 1:
+                gold_answers.append("true")
+            elif g == 0:
+                gold_answers.append("false")
     print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
@@ -166,28 +190,54 @@ def get_trivia_qa(sample):
     else:
         raise KeyError("无法在样本中找到 question 字段")
     print(f"Processing question: {question}")
+    background = {}
+    background["Instruction"] = f"[Task Instruction: TriviaQA]\
+- These are trivia-style questions; answers are usually short entities (names, dates, places).\
+- Focus on providing the *most specific single correct entity*."
 
+    background["fewshot"] = f"### Example (TriviaQA)\
+Question: Who painted the Mona Lisa?\
+Contexts:\
+[Context 1] Leonardo da Vinci, famous Renaissance artist, painted the Mona Lisa.\
+<think>\
+Step 1 - Rephrase: Identify the painter of the Mona Lisa.\
+Step 2 - Context check: Context 1 explicitly mentions Leonardo da Vinci.\
+</think>\
+Answer: Leonardo da Vinci"
+    
     # answer 可能是字符串，也可能是list
     if "answer" in sample:
         gold_answers = sample["answer"].get('aliases', [])
 
     print(f"Gold answers: {gold_answers}")
-    background = ""
     return background, question, gold_answers
 
 def get_squad(sample):
     '''
     从 SQuAD 数据集中提取问题和答案。
-    hotqa也可以使用这个方法
     '''
     question = sample["question"]
     print(f"Processing question: {question}")
 
     context = sample.get('context')
-    background = f"Read the following context carefully. \
-        Do not explain your answer or include any additional text, \
-            answer the question using **only** a span (exact phrase) from the context.\n Context: {context}" 
-    print(f"Question background: {background}")
+    background = {}
+    background["Instruction"] = f"[Task Instruction: SQuAD]\
+- The answer is usually a short span of text that directly addresses the question.\
+- Do not provide extra explanation, only the exact factual answer.\
+- Answer the question using **only** a span (exact phrase) from the background context.\
+Background: {context}" 
+    
+    background["fewshot"] = f"### Example (SQuAD)\
+Question: What is the capital of France?\
+Contexts:\
+[Context 1] France's capital city is Paris.\
+<think>\
+Step 1 - Rephrase: Find the capital city of France.\
+Step 2 - Context check: Context 1 provides direct answer.\
+</think>\
+Answer: Paris"
+    
+    # print(f"Question background: {background}")
     
     gold_answers = sample["answers"].get('text', [])
     print(f"Gold answers: {gold_answers}")
@@ -198,10 +248,25 @@ def get_hot_pot(sample):
     print(f"Processing question: {question}")
 
     context = sample.get('context')
-    background = f"Read the following context carefully. \
-        Do not explain your answer or include any additional text, \
-            answer the question using **only** a span (exact phrase) from the context.\n Context: {context}" 
-    print(f"Question background: {background}")
+    background = {}
+    background["Instruction"] = f"[Task Instruction: HotPotQA]\
+- Multi-hop reasoning required.\
+- Use evidence from at least two different contexts.\
+- Show explicit reasoning steps connecting facts before the final answer.\
+- Answer the question using **only** a span (exact phrase) from the background context.\
+Background: {context}" 
+    background["fewshot"] = f"### Example (HotPotQA)\
+Question: Which two actors starred in both 'Ocean's Eleven' and 'Ocean's Twelve'?\
+Contexts:\
+[Context 1] George Clooney starred in 'Ocean's Eleven' and 'Ocean's Twelve'.\
+[Context 2] Brad Pitt starred in 'Ocean's Eleven' and 'Ocean's Twelve'.\
+<think>\
+Step 1 - Identify relevant contexts: Context 1 and Context 2 mention actors in both movies.\
+Step 2 - Connect facts: George Clooney and Brad Pitt appear in both.\
+</think>\
+Answer: George Clooney and Brad Pitt"
+    
+    # print(f"Question background: {background}")
     
     gold_answers = sample["answer"]
     print(f"Gold answers: {gold_answers}")
@@ -216,6 +281,21 @@ def get_web_questions(sample):
     else:
         raise KeyError("无法在样本中找到 question 字段")
     print(f"Processing question: {question}")
+    background = {}
+    background["Instruction"] = f"[Task Instruction: WebQuestions]\
+- WebQuestions are designed for Freebase-style QA.\
+- Prioritize entity linking: map question entities to the most likely canonical entity.\
+- Answer should be concise and entity-focused."
+    
+    background["fewshot"] = f"### Example (WebQuestions)\
+Question: Who wrote '1984'?\
+Contexts:\
+[Context 1] George Orwell authored the novel '1984'.\
+<think>\
+Step 1 - Rephrase: Identify the author of '1984'.\
+Step 2 - Context check: Context 1 confirms George Orwell.\
+</think>\
+Answer: George Orwell"
 
     if "answer" in sample:
         gold_answers = sample["answer"]
@@ -224,7 +304,6 @@ def get_web_questions(sample):
     else:
         gold_answers = []
     print(f"Gold answers: {gold_answers}")
-    background = ""
     return background, question, gold_answers
 
 def get_mmlu(sample):
@@ -236,8 +315,25 @@ def get_mmlu(sample):
 
     choices = sample["choices"]
     options = "\n".join([f"{i}. {c}" for i, c in enumerate(choices)])
-    background = f"Choices:\n{options}\n\nWhich one is correct?\nThis is a multiple-choice question. You must choose the correct answer from the options 1, 2, 3, or 4. \
-    Answer with only the number of the correct choice. Do not explain your answer or include any additional text. Just reply with: 1, 2, 3, or 4"
+    background = {}
+    background["Instruction"] = f"[Task Instruction: MMLU]\
+- This dataset contains multiple-choice questions across many academic fields.\
+- Show reasoning, then select the best option explicitly as the final answer.\
+- You must choose the correct answer from the options 1, 2, 3, or 4.\
+- Do not explain your answer or include any additional text. Just reply with: 1, 2, 3, or 4\
+Choices:\
+{options}\
+Which one is correct?"
+    
+    background["fewshot"] = f"### Example (MMLU)\
+Question: What is the derivative of sin(x)?\
+Choices: 1) cos(x) 2) sin(x) 3) -cos(x) 4) -sin(x)\
+<think>\
+Step 1 - Rephrase: Determine derivative of sin(x).\
+Step 2 - Apply calculus rule: d/dx[sin(x)] = cos(x).\
+Step 3 - Check options: Option A matches result.\
+</think>\
+Answer: 1"
     
     print(f"Question background: {background}")
     
@@ -249,8 +345,22 @@ def get_strategyqa(sample):
     # 拼接 question + description
     question = sample.get("question", "").strip()
     desc = sample.get("description", "").strip()
-    background = f"This is a true or false question. Please answer with either True or False. Do not provide any explanation or extra words. \
-    Only reply with: True or False\n Background: {desc}\n"
+    background = {}
+    background["Instruction"] = f"[Task Instruction: StrategyQA]\
+- These are True/False questions requiring multi-hop reasoning.\
+- Always provide reasoning chain explicitly.\
+- Do not provide any explanation or extra words. Only reply with: True or False\
+Background: {desc}\n"
+
+    background["fewshot"] = f"### Example (StrategyQA)\
+Question: Can a human survive in outer space without a suit?\
+<think>\
+Step 1 - Rephrase: Assess survival of human in space without protection.\
+Step 2 - Apply physical knowledge: Vacuum, temperature extremes, no oxygen.\
+Step 3 - Conclusion: Survival is impossible.\
+</think>\
+Answer: False"
+    
     print(f"Processing question: {question}")
     print(f"Question background: {background}")
 

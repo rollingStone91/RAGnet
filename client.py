@@ -3,22 +3,22 @@ from langchain_community.document_loaders import PyPDFLoader
 from typing import List, Tuple, Dict, Union
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain.tools.retriever import create_retriever_tool
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_community.embeddings import DashScopeEmbeddings
+# from langchain.tools.retriever import create_retriever_tool
+# from langchain.agents import AgentExecutor, create_tool_calling_agent
+# from langchain_community.embeddings import DashScopeEmbeddings
 from datasets import load_dataset
 from langchain.schema import Document
 from langchain_experimental.text_splitter import SemanticChunker
 import numpy as np
 import json
 # from llama_cpp import Llama
-import faiss
+# import faiss
 import torch
 from langchain.embeddings.base import Embeddings
 import pandas as pd
 import glob
 import gzip
-from langchain_community.embeddings import HuggingFaceEmbeddings
+# from langchain_community.embeddings import HuggingFaceEmbeddings
 from sentence_transformers import SentenceTransformer
 import re
 
@@ -37,27 +37,64 @@ class QwenEmbeddings(Embeddings):
     """
     自定义维度的Embedding包装类，支持截取前N维
     """
-    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=8):
-        self.device = device
+    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=16):
+        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.model = SentenceTransformer(
                                 model_name,
-                                model_kwargs={
-                                    # "torch_dtype": torch.float16, 
-                                    # "attn_implementation": "flash_attention_2", 
-                                    "device_map": self.device},
+                                # model_kwargs={
+                                #     "torch_dtype": torch.float16, 
+                                #     "attn_implementation": "flash_attention_2", 
+                                #     },
+                                device=str(self.device),
                                 # tokenizer_kwargs={"padding_side": "left"},
                                 trust_remote_code=True)
         self.batch_size = batch_size
+        
+        # 关闭梯度，设置 eval，并把模型切换为半精度（如果在 CPU 上，半精度不会带来好处）
+        self.model.eval()
+        if self.device.type == "cuda":
+            try:
+                # 有些 wrapper 支持 .half()
+                self.model.half()
+            except Exception:
+                pass
+
+        # 进一步确保不计算梯度
+        for p in self.model.parameters():
+            p.requires_grad = False
 
     def embed_documents(self, texts):
-        # batch encode 文本列表，返回二维numpy数组
-        embeddings = self.model.encode(texts, batch_size=self.batch_size, convert_to_numpy=True, normalize_embeddings=True)
-        return embeddings.tolist()
+        """
+        batch encode 文本列表
+        """
+        # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
+        with torch.inference_mode():
+            # autocast会在内部使用半精度运算以加速
+            # with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                embeddings = self.model.encode(
+                    texts,
+                    batch_size=self.batch_size,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                    show_progress_bar=False
+                )
+        return embeddings.astype(np.float32, copy=False)
 
     def embed_query(self, text):
-        # encode 单个文本，返回list形式
-        embedding = self.model.encode(text, convert_to_numpy=True, normalize_embeddings=True, prompt_name="query")
-        return embedding.tolist()
+        """encode 单个文本"""
+        # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
+        with torch.inference_mode():
+            # autocast会在内部使用半精度运算以加速
+            # with torch.cuda.amp.autocast(device_type="cuda", dtype=torch.float16):
+                embedding = self.model.encode(
+                    text,
+                    batch_size=self.batch_size,
+                    convert_to_numpy=True,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                    prompt_name="query"
+                )
+        return embedding.astype(np.float32, copy=False)
 
     # def embed_documents(self, texts: List[str]) -> List[List[float]]:
     #     embeddings = self.embeddings.embed_documents(texts)
@@ -82,6 +119,22 @@ class Client:
         self.embeddings = embedding
         self.db: FAISS = None
         self.min_len = min_len  # 低于这个字符数的块，认为过短
+
+        # 粗切分（大窗）
+        self.coarse_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=8000,
+            chunk_overlap=400,
+            separators=["\n\n", "\n", " ", "", "."],
+            length_function=len,
+        )
+
+        # 否则调用 SemanticChunker 进行语义级切分（减少语义切分次数）
+        self.splitter = SemanticChunker(
+            embeddings=self.embeddings,
+            buffer_size=3,
+            breakpoint_threshold_type="percentile",
+            sentence_split_regex=r"(?<=[.?!])\s+",
+        )
 
         # embeddings = HuggingFaceEmbeddings( model_name=model_path,
         #                                     model_kwargs={"device": "cuda"},
@@ -251,9 +304,7 @@ class Client:
         cleaned = [c for c in merged if len(c.strip()) > 20 and not re.fullmatch(r"\W+", c)]
         return cleaned
 
-    def _chunk_text(self, text, chunk_size = 8000, overlap = 400,
-                    semantic_max = 2000,
-                    buffer_size = 3, breakpoint_type = "percentile", sentence_split_regex = r"(?<=[.?!])\s+"):
+    def _chunk_text(self, text, semantic_max = 2000):
         """
         两阶段切分（coarse->semantic）策略：
         1) 先用较大的递归字符切分器把文档切为较大的窗（coarse_chunk_size），以减少对SemanticChunker的调用次数（节省计算和显存）。
@@ -262,16 +313,7 @@ class Client:
         """
         # 预清理：合并多余空白
         text = re.sub(r"\s+", " ", text).strip()
-
-        # 粗切分（大窗）
-        coarse_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=overlap,
-            separators=["\n\n", "\n", " ", "", "."],
-            length_function=len,
-        )
-        coarse_chunks = coarse_splitter.split_text(text)
-
+        coarse_chunks = self.coarse_splitter.split_text(text)
         out_chunks = []
 
         # 对每个coarse chunk决定是否需要semantic切分
@@ -284,15 +326,8 @@ class Client:
                 out_chunks.append(c)
                 continue
 
-            # 否则调用 SemanticChunker 进行语义级切分（减少语义切分次数）
-            splitter = SemanticChunker(
-                embeddings=self.embeddings,
-                buffer_size=buffer_size,
-                breakpoint_threshold_type=breakpoint_type,
-                sentence_split_regex=sentence_split_regex,
-            )
             docs = [Document(page_content=c)]
-            sem_chunks = splitter.split_documents(docs)
+            sem_chunks = self.splitter.split_documents(docs)
 
             # 提取文本并合并短块
             texts = [d.page_content.strip() for d in sem_chunks if d.page_content.strip()]
@@ -322,7 +357,7 @@ class Client:
         for ch in chunks:
             yield Document(page_content=ch, metadata=doc.metadata)
     
-    def build_vectorstore(self, docs:List[Document], batch_size=8, incremental=True):
+    def build_vectorstore(self, docs:List[Document], batch_size=16, incremental=True):
         """
         构建向量数据库
         batch_size: 批处理大小
@@ -387,14 +422,14 @@ class Client:
         
         # 获取查询向量（HuggingFaceEmbeddings 已归一化输出）
         q_vec = self.embeddings.embed_query(query)
-        query_vec = np.array(q_vec, dtype=np.float32)
+        # query_vec = np.array(q_vec, dtype=np.float32)
 
         # 决定 fetch_k 大小，保证过滤后还能拿到 top_k
         if fetch_k is None:
             fetch_k = top_k * 5
 
         # 一次性用内积搜索 fetch_k 个候选（等价于余弦相似度）
-        scores, indices = self.db.index.search(query_vec.reshape(1, -1), fetch_k)
+        scores, indices = self.db.index.search(q_vec.reshape(1, -1), fetch_k)
 
         # 过滤掉过短文档，并截取前 top_k 个
         results = []
@@ -410,14 +445,4 @@ class Client:
             if len(results) >= top_k:
                 break
 
-        return results, q_vec
-
-if __name__ == "__main__":
-    # 示例：创建Client并加载向量存储
-    clients = [Client(vectorstore_path="./common_sense_db"), Client(vectorstore_path="./computer_science_coding_related_db"),
-               Client(vectorstore_path="./law_related_db"), Client(vectorstore_path="./medicine_related_db")]
-    folder_paths = ["./classified_dataset/common_sense", "./classified_dataset/computer_science_coding_related",
-             "./classified_dataset/law_related", "./classified_dataset/medicine_related"]
-    for c, f in zip(clients, folder_paths):
-        print(f"Building vectorstore for {f}...")
-        c.build_vectorstore(folder_path=f)
+        return results, q_vec.tolist()
