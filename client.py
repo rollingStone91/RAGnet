@@ -3,26 +3,22 @@ from langchain_community.document_loaders import PyPDFLoader
 from typing import List, Tuple, Dict, Union
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-# from langchain.tools.retriever import create_retriever_tool
-# from langchain.agents import AgentExecutor, create_tool_calling_agent
-# from langchain_community.embeddings import DashScopeEmbeddings
 from datasets import load_dataset
 from langchain.schema import Document
 from langchain_experimental.text_splitter import SemanticChunker
 import numpy as np
 import json
-# from llama_cpp import Llama
-# import faiss
+import faiss
 import torch
 from langchain.embeddings.base import Embeddings
 import pandas as pd
 import glob
 import gzip
-# from langchain_community.embeddings import HuggingFaceEmbeddings
 from sentence_transformers import SentenceTransformer
 import re
-
-# from modelscope import LLM, PoolingParams
+from langchain_community.vectorstores.utils import (
+    DistanceStrategy,
+)
 
 class Proof():
     def __init__(self, document: Document, vector: List[np.ndarray]=[], score: float=0):
@@ -37,16 +33,16 @@ class QwenEmbeddings(Embeddings):
     """
     自定义维度的Embedding包装类，支持截取前N维
     """
-    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=16):
+    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=4):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.model = SentenceTransformer(
                                 model_name,
-                                # model_kwargs={
-                                #     "torch_dtype": torch.float16, 
-                                #     "attn_implementation": "flash_attention_2", 
-                                #     },
+                                model_kwargs={
+                                    "torch_dtype": torch.float16, 
+                                    "attn_implementation": "flash_attention_2", 
+                                    },
                                 device=str(self.device),
-                                # tokenizer_kwargs={"padding_side": "left"},
+                                tokenizer_kwargs={"padding_side": "left"},
                                 trust_remote_code=True)
         self.batch_size = batch_size
         
@@ -54,8 +50,8 @@ class QwenEmbeddings(Embeddings):
         self.model.eval()
         if self.device.type == "cuda":
             try:
-                # 有些 wrapper 支持 .half()
-                self.model.half()
+                torch.backends.cuda.matmul.allow_tf32 = True
+                torch.set_float32_matmul_precision("high")
             except Exception:
                 pass
 
@@ -70,7 +66,7 @@ class QwenEmbeddings(Embeddings):
         # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
         with torch.inference_mode():
             # autocast会在内部使用半精度运算以加速
-            # with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 embeddings = self.model.encode(
                     texts,
                     batch_size=self.batch_size,
@@ -85,7 +81,7 @@ class QwenEmbeddings(Embeddings):
         # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
         with torch.inference_mode():
             # autocast会在内部使用半精度运算以加速
-            # with torch.cuda.amp.autocast(device_type="cuda", dtype=torch.float16):
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 embedding = self.model.encode(
                     text,
                     batch_size=self.batch_size,
@@ -339,25 +335,23 @@ class Client:
         seen = set()
         final_chunks = []
         for chunk in out_chunks:
-            key = chunk[:200]  # 截取开头作为快速去重的hash
+            key = chunk[:256]  # 截取开头作为快速去重的hash
             if key in seen:
                 continue
             seen.add(key)
             final_chunks.append(chunk)
         return final_chunks
     
-    def iter_doc_chunks(self, doc: Document, chunk_size = 8000, overlap: int = 400,
-                        semantic_max = 2000, **semantic_kwargs):
+    def iter_doc_chunks(self, doc: Document, semantic_max = 2000):
         """
         将单篇文档流式化为Document块的生成器，便于分批嵌入与索引。
         """
         text = doc.page_content or ""
-        chunks = self._chunk_text(text, chunk_size=chunk_size, overlap=overlap, semantic_max=semantic_max,
-                                  **semantic_kwargs)
+        chunks = self._chunk_text(text, semantic_max=semantic_max)
         for ch in chunks:
             yield Document(page_content=ch, metadata=doc.metadata)
-    
-    def build_vectorstore(self, docs:List[Document], batch_size=16, incremental=True):
+
+    def build_vectorstore(self, docs:List[Document], batch_size=4, incremental=True):
         """
         构建向量数据库
         batch_size: 批处理大小
@@ -368,7 +362,6 @@ class Client:
             self.load_vectorstore()
 
         texts_batch, metadatas_batch = [], []
-        # 构建 FAISS
         for i, doc in enumerate(docs):
             for chunk_doc in self.iter_doc_chunks(doc):
                 texts_batch.append(chunk_doc.page_content)
@@ -378,18 +371,30 @@ class Client:
                         self.db = FAISS.from_texts(
                                     texts_batch,
                                     embedding=self.embeddings,
-                                    metadatas=metadatas_batch
+                                    metadatas=metadatas_batch,
+                                    **{"distance_strategy": DistanceStrategy.MAX_INNER_PRODUCT}
                                 )
                     else:
-                        self.db.add_texts(texts_batch, metadatas=metadatas_batch)
+                        self.db.add_texts(
+                            texts_batch, 
+                            metadatas=metadatas_batch,
+                            )
                     
                     texts_batch.clear()
                     metadatas_batch.clear()
-                    # 清理缓存，避免显存累积
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                        torch.cuda.synchronize()
+                # 清理缓存，避免显存累积
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
             print(f"Inserted batch up to docs {i+1}/{len(docs)}")
+
+        if texts_batch:
+            self.db.add_texts(
+                texts_batch, 
+                metadatas=metadatas_batch,
+                )
+            texts_batch.clear()
+            metadatas_batch.clear()
 
         # 保存向量库
         if self.db:
@@ -411,7 +416,7 @@ class Client:
         )
         print(f"Vectorstore {self.vectorstore_path} loaded.")
 
-    def retrieve(self, query:str, top_k=4, fetch_k: int = None):
+    def retrieve(self, query:str, top_k=4):
         """
         通过query在FAISS向量库中检索k个最相似文档，
         返回每个Document对象、其特征向量及相似度得分
@@ -422,27 +427,14 @@ class Client:
         
         # 获取查询向量（HuggingFaceEmbeddings 已归一化输出）
         q_vec = self.embeddings.embed_query(query)
-        # query_vec = np.array(q_vec, dtype=np.float32)
 
-        # 决定 fetch_k 大小，保证过滤后还能拿到 top_k
-        if fetch_k is None:
-            fetch_k = top_k * 5
+        # 用内置方法检索 (会自动根据 distance_strategy 算相似度)
+        docs_and_scores = self.db.similarity_search_with_score_by_vector(q_vec, k=top_k)   
 
-        # 一次性用内积搜索 fetch_k 个候选（等价于余弦相似度）
-        scores, indices = self.db.index.search(q_vec.reshape(1, -1), fetch_k)
-
-        # 过滤掉过短文档，并截取前 top_k 个
         results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx < 0:
-                continue
-            doc_id = self.db.index_to_docstore_id[idx]
-            doc = self.db.docstore.search(doc_id)
-            if len(doc.page_content) < 20:
-                continue
-            vec = self.db.index.reconstruct(int(idx)).tolist()
-            results.append(Proof(doc, vec, float(score)))
-            if len(results) >= top_k:
-                break
+        for doc, score in docs_and_scores:
+            # 如果你还想要向量，可以 reconstruct
+            vec = self.db.index.reconstruct(int(self.db.docstore._dict[doc.metadata["doc_id"]]))
+            results.append(Proof(doc, vec, float(score))) 
 
         return results, q_vec.tolist()
