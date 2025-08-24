@@ -203,11 +203,10 @@ class Client:
             meshes = ex["context"].get("meshes", [])
             context_text = f"Question:{question}"
             context_text += "\n".join([f"{label}:{text}" for label, text in zip(labels, contexts)])
+            context_text += f"\nLong Answer:{long_answer}\nSo the answer is {answer}."
             if context_text.strip():
                 docs.append(Document(page_content=context_text,
-                                     metadata={'source': data_files, 'doc_id': pubid, 
-                                               'answer': answer, 'long_answer': long_answer,
-                                                'meshes': meshes}))
+                                     metadata={'pub_id': pubid, 'meshes': meshes}))
         return docs
     
     def _load_legalbench(self, data_dir: str ="./datasets/legalbench/data", tasks: Union[str, List[str]]="abercrombie") -> List[Document]:
