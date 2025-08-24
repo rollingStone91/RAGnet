@@ -155,10 +155,10 @@ class Client:
         return docs
 
     # 读取JSON文件夹中的所有文件
-    def _load_json_folder(self, folder_path: str, start=0, step=1000) -> List[Document]:
+    def _load_json_folder(self, folder_path: str, start=0, end=1000) -> List[Document]:
         docs = []
         json_files = sorted([f for f in os.listdir(folder_path) if f.endswith('.json')])
-        selected_files = json_files[start:start + step]  # 选取指定范围的文件
+        selected_files = json_files[start:end]  # 选取指定范围的文件
         for i, filename in enumerate(selected_files):
             filepath = os.path.join(folder_path, filename)
             with open(filepath, encoding='utf-8') as f:
@@ -382,10 +382,10 @@ class Client:
                     
                     texts_batch.clear()
                     metadatas_batch.clear()
-                # 清理缓存，避免显存累积
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
+                    # 清理缓存，避免显存累积
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
             print(f"Inserted batch up to docs {i+1}/{len(docs)}")
 
         if texts_batch:
@@ -428,13 +428,23 @@ class Client:
         # 获取查询向量（HuggingFaceEmbeddings 已归一化输出）
         q_vec = self.embeddings.embed_query(query)
 
-        # 用内置方法检索 (会自动根据 distance_strategy 算相似度)
-        docs_and_scores = self.db.similarity_search_with_score_by_vector(q_vec, k=top_k)   
+        # 原生 FAISS 搜索，返回距离矩阵 D 和 索引矩阵 I
+        D, I = self.db.index.search(q_vec.reshape(1, -1), top_k) 
 
         results = []
-        for doc, score in docs_and_scores:
-            # 如果你还想要向量，可以 reconstruct
-            vec = self.db.index.reconstruct(int(self.db.docstore._dict[doc.metadata["doc_id"]]))
-            results.append(Proof(doc, vec, float(score))) 
+        for dist, idx in zip(D[0], I[0]):
+            if int(idx) < 0:
+                continue
+
+            # 将FAISS索引id映射到docstore id
+            docstore_id = self.db.index_to_docstore_id[idx]
+
+            # 从 docstore 取 Document；不同实现接口可能不同，这里使用内置 _dict 作为后备
+            doc = self.db.docstore._dict[docstore_id]
+            # reconstruct 向量（如果索引支持）    
+            vec = self.db.index.reconstruct(int(idx)).tolist()
+
+            # dist 的含义取决于索引类型，直接返回即可
+            results.append(Proof(doc, vec, float(dist)))
 
         return results, q_vec.tolist()
