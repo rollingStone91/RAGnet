@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 
 # ====== 日志配置 ======
-log_filename = f"./logs_8b/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_filename = f"./logs_4b_8b/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.INFO,  # DEBUG 级别会记录更多细节
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -62,8 +62,8 @@ class Server:
         2. **Construct a mental timeline or geographic scope** relevant to the question.
         3. **Individually evaluate each provided context** for relevance to the clarified question.
         4. If a context is irrelevant, **discard it completely** and do not use it in reasoning or the answer.
-        5. Use **only explicit statements from relevant contexts** to support your answer — never guess or invent.
-        6. If there is no supporting evidence, answer exactly: "I don't know."
+        5. Use statements from relevant contexts to support your answer — never guess or invent.
+        6. If there is no supporting evidence, answer exactly: "I don’t know.",But you can use the knowledge that you already knew before.
         7. If there is conflicting evidence, prefer the most explicit, direct, recent, and specific source.
         8. Even if 20 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
         9. The earlier a context appears, the higher its similarity to the question — but still verify relevance before use.
