@@ -1,0 +1,205 @@
+id: llama_prompts
+version: "1.0"
+language: en
+description: >
+  Centralized prompt configuration for RAG evaluation and benchmarking.
+  Includes system role, generic user prompts, and few-shot examples.
+
+# ==============================
+#  System Prompt    
+# ==============================
+system_prompt:
+    role: system
+    content: |
+      You are an Evidence-First QA Arbiter. Answer factual questions **directly and concisely**.
+      - Only use relevant contexts to answer the question.
+      - If no supporting evidence exists, answer: "Unknown".
+      - Show reasoning internally in <think> ... </think>, then provide final answer.
+      - Do NOT summarize contexts or give unrelated explanations.
+      - Even if 10+ contexts are provided, focus only on the most relevant ones.
+
+# ==============================
+#  User Prompt Templates
+# ==============================
+user_prompts:
+  name: llama_prompt
+  description: Standard RAG query template
+  template: |
+    Question: {query}
+    Next, here are the relevant contexts and metadata:
+    {contexts_block}
+    Here is a description of the question:
+    {instruction}
+
+# ==============================
+#  Few-shot Examples
+# ==============================
+fewshots:
+  hot_qa:
+    description: Few-shot examples for HotpotQA benchmark
+    examples:
+      content: |
+        ### Example (HotPotQA)
+        Question: "Which two actors starred in both 'Ocean's Eleven' and 'Ocean's Twelve'?"
+        Contexts:
+        [Context 1] George Clooney starred in 'Ocean's Eleven' and 'Ocean's Twelve'.
+        [Context 2] Brad Pitt starred in 'Ocean's Eleven' and 'Ocean's Twelve'.
+        <think>
+        Step 1 - Identify relevant contexts: Context 1 and Context 2 mention actors in both movies.
+        Step 2 - Connect facts: George Clooney and Brad Pitt appear in both.
+        </think>
+        Answer: George Clooney and Brad Pitt
+    instruction:
+      template: |
+        [Task Instruction: HotPotQA]
+        - Multi-hop reasoning; use evidence from at least two contexts.
+        Background: {context}
+
+  squad:
+    description: Few-shot examples for SQuAD benchmark
+    examples:
+      content: |
+        ### Example (SQuAD)
+        Question: What is the capital of France?
+        Contexts:
+        [Context 1] France's capital city is Paris.
+        <think>
+        Step 1 - Rephrase: Find the capital city of France.
+        Step 2 - Context check: Context 1 provides direct answer.
+        </think>
+        Answer: Paris       
+    instruction:
+      template: |
+        [Task Instruction: SQuAD]
+        - The answer is usually a short span of text that directly addresses the question.
+        - Do not provide extra explanation, only the exact factual answer.
+        - Answer the question using **only** a span (exact phrase) from the background context.
+        Background: {context} 
+        - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
+
+  natural_questions:
+    description: Few-shot examples for natural questions benchmark
+    examples:
+      content: |
+        ### Example (NaturalQuestions)
+        Question: "When was the Eiffel Tower completed?"
+        === CONTEXTS ===
+        [Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.
+        <think>
+        Step 1 - Rephrase question: Determine year Eiffel Tower was completed.
+        Step 2 - Context check: Context 1 confirms the completion year.
+        </think>
+        Answer: 1889
+    instruction:
+      template: |
+        [Task Instruction: Natural Questions]
+        - Open-domain factual questions, concise Wikipedia-style answers.
+        - Clarify ambiguous scope if needed.
+        html: 
+        {html}
+
+  web_questions:
+    description: Few-shot examples for web questions benchmark
+    examples:
+      content: |
+        ### Example (WebQuestions)
+        Question: "Who wrote '1984'?"
+        Contexts:
+        [Context 1] George Orwell authored the novel '1984'.
+        <think>
+        Step 1 - Rephrase: Identify the author of '1984'.
+        Step 2 - Context check: Context 1 confirms George Orwell.
+        </think>
+        Answer: George Orwell       
+    instruction:
+      template: |
+        [Task Instruction: WebQuestions]
+        - Prioritize entity linking; answer should be concise and entity-focused.
+
+  mmlu:
+    description: Few-shot examples for mmlu benchmark
+    examples:
+      content: |
+        ### Example (MMLU)
+        Question: "What is the derivative of sin(x)?"
+        Options: 1) cos(x) 2) sin(x) 3) -cos(x) 4) -sin(x)
+        <think>
+        Step 1 - Rephrase: Determine derivative of sin(x).
+        Step 2 - Apply calculus rule: d/dx[sin(x)] = cos(x).
+        Step 3 - Check options: Option A matches result.
+        </think>
+        Answer: 1
+    instruction:
+      template: |
+        [Task Instruction: MMLU]
+        - Multi-choice academic questions; show reasoning then select the correct option.
+        - Do not explain your answer or include any additional text. Just reply with: 1, 2, 3, or 4
+        Choices:
+        {options}
+        Which one is correct?
+
+  strategy_qa:
+    description: Few-shot examples for strategy benchmark
+    examples:
+      content: |
+        ### Example (StrategyQA)
+        Question: "Can a human survive in outer space without a suit?"
+        <think>
+        Step 1 - Rephrase: Assess survival of human in space without protection.
+        Step 2 - Apply physical knowledge: Vacuum, temperature extremes, no oxygen.
+        Step 3 - Conclusion: Survival is impossible.
+        </think>
+        Answer: No               
+    instruction:
+      template: |
+        [Task Instruction: StrategyQA]
+        - True/False multi-hop reasoning; Only reply with: True or False.
+        Background: {desc}     
+
+  trivia_qa:
+    description: Few-shot examples for trivia_qa benchmark
+    examples:
+      content: |
+        ### Example (TriviaQA)
+        Question: "Who painted the Mona Lisa?"
+        === CONTEXTS ===
+        [Context 1] Leonardo da Vinci painted the Mona Lisa.
+        <think>
+        Step 1 - Rephrase question: Identify the painter of the Mona Lisa.
+        Step 2 - Context check: Context 1 confirms Leonardo da Vinci.
+        </think>
+        Answer: Leonardo da Vinci          
+    instruction:
+      template: |
+        [Task Instruction: TriviaQA]
+        - Focus on the single most specific correct entity (name, date, place).
+
+  general:
+    description: General Few-shot
+    examples:
+      content: |
+        ### General Example
+        Question: "Did Francois Mitterrand ever meet Barack Obama while they both held the position of President?"
+        Contexts:
+        [Context 1] Sandro Pertini, Italian president... Franklin D. Roosevelt (1882–1945), 32nd President of the United States... Joseph Stalin (1878–1953), Premier of the USSR...
+        [Context 2] In 2007, Downey conducted a forum... Senators Joe Biden, Hillary Clinton, Obama...
+        [Context 3] April 23, 1964... Tanganyikan President Julius Nyerere...
+        [Context 4] U.S. President Barack Obama commented on fake news in 2016...
+        [Context 5] Milton R. Wolf... is President Barack Obama's second cousin...
+
+        <think>     
+        Step 1 - Rephrase: The question asks if Mitterrand and Obama were both presidents at the same time and met during that overlap.  
+        Step 2 - Keywords: "Francois Mitterrand", "Barack Obama", "both presidents", "met".  
+        Step 3 - Timeline check:
+           - Mitterrand was President of France from 1981 to 1995.
+           - Obama was President of the U.S. from 2009 to 2017.
+           - Their terms did not overlap.
+        Step 4 - Context check:
+           - Context 1: Mentions many presidents, but not Mitterrand-Obama meeting. (Irrelevant)
+           - Context 2: Obama appears in 2007 as a candidate, Mitterrand already out of office. (Irrelevant)
+           - Context 3: Event in 1964, unrelated. (Irrelevant)
+           - Context 4: Obama in 2016, Mitterrand long gone. (Irrelevant)
+           - Context 5: Obama's cousin, no link to Mitterrand. (Irrelevant)
+        Step 5 - Conclusion: No evidence of a meeting while both were presidents; historically impossible due to non-overlapping terms.
+        </think>
+        Answer: False
