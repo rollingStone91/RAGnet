@@ -128,8 +128,15 @@ def compute_score(answer: str, gold_list: list[str]):
     return best_p, best_r, best_f1
 
 def strip_html(html: str) -> str:
-    """简单地把 HTML 去标签，保留可读文字。"""
-    return BeautifulSoup(html, "html.parser").get_text(separator=" ")
+    """去除 HTML 标签，清理多余换行和空格"""
+    # 提取纯文本，先用换行作为分隔
+    text = BeautifulSoup(html, "html.parser").get_text(separator=" ")
+    # 去掉 " 空格 + 换行 " 的情况
+    text = re.sub(r" +\n", "\n", text)
+    # 把多个连续换行压缩成一个
+    text = re.sub(r"\n+", "\n", text)
+    # 去掉首尾空白
+    return text.strip()
 
 def get_natural_questions(sample):
     '''
@@ -142,7 +149,7 @@ def get_natural_questions(sample):
     html = sample["document"]["html"]
     background = {}
     template = config["fewshots"]["natural_questions"]["instruction"]["template"]
-    background["Instruction"] = template.format(html=strip_html(html))
+    background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["natural_questions"]["examples"]["content"]
     # print(f"Question background: {background}")
 
@@ -202,7 +209,7 @@ def get_squad(sample):
     context = sample.get('context')
     background = {}
     template = config["fewshots"]["squad"]["instruction"]["template"]
-    background["Instruction"] = template.format(context=context)
+    background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["squad"]["examples"]["content"]
     # print(f"Question background: {background}")
     
@@ -217,7 +224,7 @@ def get_hot_pot(sample):
     context = sample.get('context')
     background = {}
     template = config["fewshots"]["hot_qa"]["instruction"]["template"]
-    background["Instruction"] = template.format(context=context)
+    background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["hot_qa"]["examples"]["content"]
     # print(f"Question background: {background}")
     
@@ -274,7 +281,7 @@ def get_strategyqa(sample):
     desc = sample.get("description", "").strip()
     background = {}
     template = config["fewshots"]["strategy_qa"]["instruction"]["template"]
-    background["Instruction"] = template.format(desc=desc)
+    background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["strategy_qa"]["examples"]["content"]
     
     print(f"Processing question: {question}")
