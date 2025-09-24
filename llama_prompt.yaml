@@ -25,9 +25,10 @@ user_prompts:
   name: llama_prompt
   description: Standard RAG query template
   template: |
-    Question: {query}
-    Next, here are the relevant contexts and metadata:
+    Here are the relevant contexts and metadata:
     {contexts_block}
+    Question:
+    {query}
     Here is a description of the question:
     {instruction}
 
@@ -53,7 +54,6 @@ fewshots:
       template: |
         [Task Instruction: HotPotQA]
         - Multi-hop reasoning; use evidence from at least two contexts.
-        Background: {context}
 
   squad:
     description: Few-shot examples for SQuAD benchmark
@@ -73,8 +73,6 @@ fewshots:
         [Task Instruction: SQuAD]
         - The answer is usually a short span of text that directly addresses the question.
         - Do not provide extra explanation, only the exact factual answer.
-        - Answer the question using **only** a span (exact phrase) from the background context.
-        Background: {context} 
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
 
   natural_questions:
@@ -95,8 +93,6 @@ fewshots:
         [Task Instruction: Natural Questions]
         - Open-domain factual questions, concise Wikipedia-style answers.
         - Clarify ambiguous scope if needed.
-        html: 
-        {html}
 
   web_questions:
     description: Few-shot examples for web questions benchmark
@@ -153,8 +149,7 @@ fewshots:
     instruction:
       template: |
         [Task Instruction: StrategyQA]
-        - True/False multi-hop reasoning; Only reply with: True or False.
-        Background: {desc}     
+        - True/False multi-hop reasoning; Only reply with: True or False.     
 
   trivia_qa:
     description: Few-shot examples for trivia_qa benchmark

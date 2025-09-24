@@ -93,9 +93,10 @@ user_prompts:
   name: rag_prompt
   description: Standard RAG query template
   template: |
-    Question: {query}
-    Next, here are the relevant contexts and metadata:
+    Here are the relevant contexts and metadata:
     {contexts_block}
+    Question:
+    {query}
     Here is a description of the question:
     {instruction}
 
@@ -123,8 +124,6 @@ fewshots:
         - Multi-hop reasoning required.
         - Use evidence from at least two different contexts.
         - Show explicit reasoning steps connecting facts before the final answer.
-        - Answer the question using **only** a span (exact phrase) from the background context.
-        Background: {context}
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
 
   squad:
@@ -145,8 +144,6 @@ fewshots:
         [Task Instruction: SQuAD]
         - The answer is usually a short span of text that directly addresses the question.
         - Do not provide extra explanation, only the exact factual answer.
-        - Answer the question using **only** a span (exact phrase) from the background context.
-        Background: {context} 
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
 
   natural_questions:
@@ -169,9 +166,6 @@ fewshots:
         - These questions are open-domain, often requiring Wikipedia-style factual answers.
         - Ensure conciseness and focus only on the central fact.
         - If the question is ambiguous, clarify the scope explicitly before answering.
-        - Answer the question using a span (exact phrase) from the html context.
-        html: 
-        {html}
 
   web_questions:
     description: Few-shot examples for web questions benchmark
@@ -237,8 +231,7 @@ fewshots:
         - These are True/False questions requiring multi-hop reasoning.
         - Always provide reasoning chain explicitly.
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
-        - Do not provide any explanation or extra words. Only reply with: True or False
-        Background: {desc}      
+        - Do not provide any explanation or extra words. Only reply with: True or False  
 
   trivia_qa:
     description: Few-shot examples for trivia_qa benchmark
