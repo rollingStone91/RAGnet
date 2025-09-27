@@ -1,5 +1,5 @@
-numpy==1.23.5
-faiss-gpu==1.7.2
+numpy
+faiss-gpu
 langchain
 langchain_community
 langchain_experimental

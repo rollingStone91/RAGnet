@@ -78,7 +78,7 @@ def compute_score(answer: str, gold_list: list[str]):
     if isinstance(gold_list, str):
         gold_list = [gold_list]
     if gold_list == []:
-        if answer in ["", "I don't know", "no answer", "not found", "I don't know.", "n/a"]: 
+        if answer in ["", "I don't know", "no answer", "not found", "I don't know.", "None", "none"]: 
             return 1.0, 1.0, 1.0
         else:
             return 0.0, 0.0, 0.0
@@ -90,7 +90,7 @@ def compute_score(answer: str, gold_list: list[str]):
     # 检测是否为选择题
     is_choice = False
     # 单字符选项（如 'A','B','C'）
-    if all(re.fullmatch(r"[a-z0-9]", g) for g in gold_norms):
+    if all(re.fullmatch(r"[a-d1-4]", g) for g in gold_norms):
         is_choice = True
     # 二元选项（如 'true','false'）
     if set(gold_norms) <= {"true", "false"}:
@@ -110,7 +110,7 @@ def compute_score(answer: str, gold_list: list[str]):
     best_p = best_r = best_f1 = 0.0
 
     for g in gold_norms:
-        gold_tokens = normalize_answer(g).split()
+        gold_tokens = g.split()
         if len(gold_tokens) == 0:
             continue
 
@@ -143,7 +143,7 @@ def get_natural_questions(sample):
     从 Natural Questions 数据集中提取问题和答案。
     '''
     question = sample["question"]["text"]
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
 
     # 这里直接用整个 HTML 内容去标签后的文本
     html = sample["document"]["html"]
@@ -175,7 +175,7 @@ def get_natural_questions(sample):
                 gold_answers.append("true")
             elif g == 0:
                 gold_answers.append("false")
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
 def get_trivia_qa(sample):
@@ -186,7 +186,7 @@ def get_trivia_qa(sample):
         question = sample["question"]
     else:
         raise KeyError("无法在样本中找到 question 字段")
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
     background = {}
     template = config["fewshots"]["trivia_qa"]["instruction"]["template"]
     background["Instruction"] = template
@@ -196,7 +196,7 @@ def get_trivia_qa(sample):
     if "answer" in sample:
         gold_answers = sample["answer"].get('aliases', [])
 
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
 def get_squad(sample):
@@ -204,7 +204,7 @@ def get_squad(sample):
     从 SQuAD 数据集中提取问题和答案。
     '''
     question = sample["question"]
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
 
     context = sample.get('context')
     background = {}
@@ -214,12 +214,12 @@ def get_squad(sample):
     # print(f"Question background: {background}")
     
     gold_answers = sample["answers"].get('text', [])
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
 def get_hot_pot(sample):
     question = sample["question"]
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
 
     context = sample.get('context')
     background = {}
@@ -229,7 +229,7 @@ def get_hot_pot(sample):
     # print(f"Question background: {background}")
     
     gold_answers = sample["answer"]
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
 def get_web_questions(sample):
@@ -240,7 +240,7 @@ def get_web_questions(sample):
         question = sample["question"]
     else:
         raise KeyError("无法在样本中找到 question 字段")
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
     background = {}
     template = config["fewshots"]["web_questions"]["instruction"]["template"]
     background["Instruction"] = template
@@ -252,7 +252,7 @@ def get_web_questions(sample):
         gold_answers = sample["answers"]
     else:
         gold_answers = []
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, gold_answers
 
 def get_mmlu(sample):
@@ -260,7 +260,7 @@ def get_mmlu(sample):
     从 MMLU 数据集中提取问题和答案。
     '''
     question = sample["question"]
-    print(f"Processing question: {question}")
+    # print(f"Processing question: {question}")
 
     choices = sample["choices"]
     options = "\n".join([f"{i}. {c}" for i, c in enumerate(choices)])
@@ -269,10 +269,10 @@ def get_mmlu(sample):
     background["Instruction"] = template.format(options=options)
     background["fewshot"] = config["fewshots"]["mmlu"]["examples"]["content"]
     
-    print(f"Question background: {background}")
+    # print(f"Question background: {background}")
     
     gold_answers = sample["answer"]
-    print(f"Gold answers: {gold_answers}")
+    # print(f"Gold answers: {gold_answers}")
     return background, question, str(gold_answers)
 
 def get_strategyqa(sample):
@@ -284,11 +284,11 @@ def get_strategyqa(sample):
     background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["strategy_qa"]["examples"]["content"]
     
-    print(f"Processing question: {question}")
-    print(f"Question background: {background}")
+    # print(f"Processing question: {question}")
+    # print(f"Question background: {background}")
 
     gold_answer = sample["answer"]
-    print(f"Gold answer: {gold_answer}")
+    # print(f"Gold answer: {gold_answer}")
     return background, question, str(gold_answer)
 
 def exact_match(ans: str, gold_ans: List[str]) -> bool:

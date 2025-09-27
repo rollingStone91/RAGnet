@@ -8,13 +8,10 @@ from langchain.schema import Document
 from langchain_experimental.text_splitter import SemanticChunker
 import numpy as np
 import json
-import faiss
 import torch
-from langchain.embeddings.base import Embeddings
 import pandas as pd
 import glob
 import gzip
-from sentence_transformers import SentenceTransformer
 import re
 from langchain_community.vectorstores.utils import (
     DistanceStrategy,
@@ -29,90 +26,15 @@ class Proof():
         self.groth_id = 0
         self.pog_id = 0
 
-class QwenEmbeddings(Embeddings):
-    """
-    自定义维度的Embedding包装类，支持截取前N维
-    """
-    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=4):
-        self.device = torch.device(device if torch.cuda.is_available() else "cpu")
-        self.model = SentenceTransformer(
-                                model_name,
-                                model_kwargs={
-                                    "torch_dtype": torch.float16, 
-                                    "attn_implementation": "flash_attention_2", 
-                                    },
-                                device=str(self.device),
-                                tokenizer_kwargs={"padding_side": "left"},
-                                trust_remote_code=True)
-        self.batch_size = batch_size
-        
-        # 关闭梯度，设置 eval，并把模型切换为半精度（如果在 CPU 上，半精度不会带来好处）
-        self.model.eval()
-        if self.device.type == "cuda":
-            try:
-                torch.backends.cuda.matmul.allow_tf32 = True
-                torch.set_float32_matmul_precision("high")
-            except Exception:
-                pass
-
-        # 进一步确保不计算梯度
-        for p in self.model.parameters():
-            p.requires_grad = False
-
-    def embed_documents(self, texts):
-        """
-        batch encode 文本列表
-        """
-        # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
-        with torch.inference_mode():
-            # autocast会在内部使用半精度运算以加速
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                embeddings = self.model.encode(
-                    texts,
-                    batch_size=self.batch_size,
-                    convert_to_numpy=True,
-                    normalize_embeddings=True,
-                    show_progress_bar=False
-                )
-        return embeddings.astype(np.float32, copy=False)
-
-    def embed_query(self, text):
-        """encode 单个文本"""
-        # SentenceTransformer 的encode已经做了batching，下面用inference_mode + autocast
-        with torch.inference_mode():
-            # autocast会在内部使用半精度运算以加速
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                embedding = self.model.encode(
-                    text,
-                    batch_size=self.batch_size,
-                    convert_to_numpy=True,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                    prompt_name="query"
-                )
-        return embedding.astype(np.float32, copy=False)
-
-    # def embed_documents(self, texts: List[str]) -> List[List[float]]:
-    #     embeddings = self.embeddings.embed_documents(texts)
-    #     if self.dim is not None:
-    #         embeddings = [emb[:self.dim] for emb in embeddings]
-    #     return embeddings
-    
-    # def embed_query(self, text: str) -> List[float]:
-    #     embedding = self.embeddings.embed_query(text)
-    #     if self.dim is not None:
-    #         embedding = embedding[:self.dim]
-    #     return embedding
-
-
 class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, embedding, vectorstore_path: str = "faiss_db", min_len = 50): # dashscope_api_key: str,使用api调用embedding模型
+    def __init__(self, embedding, reranker, vectorstore_path: str = "faiss_db", min_len = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
         self.embeddings = embedding
+        self.reranker = reranker
         self.db: FAISS = None
         self.min_len = min_len  # 低于这个字符数的块，认为过短
 
@@ -131,18 +53,6 @@ class Client:
             breakpoint_threshold_type="percentile",
             sentence_split_regex=r"(?<=[.?!])\s+",
         )
-
-        # embeddings = HuggingFaceEmbeddings( model_name=model_path,
-        #                                     model_kwargs={"device": "cuda"},
-        #                                     encode_kwargs={"normalize_embeddings": True,
-        #                                                     "batch_size": 8,})
-        #                                     # multi_process=True)
-
-        # self.embeddings = DashScopeEmbeddings(
-        #     model="text-embedding-v1",
-        #     dashscope_api_key=dashscope_api_key
-        # )
-        # self.embeddings = LlamaCppEmbeddings(model_path=model_path)
     
     # 读取PDF文件并提取文本内容
     def _read_pdfs(self, pdf_paths: List[str]) -> List[Document]:
@@ -415,7 +325,7 @@ class Client:
         )
         print(f"Vectorstore {self.vectorstore_path} loaded.")
 
-    def retrieve(self, query:str, top_k=4):
+    def retrieve(self, query:str, top_k=5, batch_size=5):
         """
         通过query在FAISS向量库中检索k个最相似文档，
         返回每个Document对象、其特征向量及相似度得分
@@ -430,7 +340,7 @@ class Client:
         # 原生 FAISS 搜索，返回距离矩阵 D 和 索引矩阵 I
         D, I = self.db.index.search(q_vec.reshape(1, -1), top_k) 
 
-        results = []
+        contexts = []
         for dist, idx in zip(D[0], I[0]):
             if int(idx) < 0:
                 continue
@@ -444,6 +354,25 @@ class Client:
             vec = self.db.index.reconstruct(int(idx)).tolist()
 
             # dist 的含义取决于索引类型，直接返回即可
-            results.append(Proof(doc, vec, float(dist)))
+            contexts.append(Proof(doc, vec, float(dist)))
+        
+        pairs = [(query, p.document.page_content) for p in contexts]
+        all_scores = []
 
-        return results, q_vec.tolist()
+        # 禁用梯度，减少显存占用
+        with torch.no_grad():
+            for i in range(0, len(pairs), batch_size):
+                batch_pairs = pairs[i:i+batch_size]
+                inputs = self.reranker.process_inputs(batch_pairs)
+                scores = self.reranker.compute_logits(inputs)
+                all_scores.extend(scores)
+                # 清理显存
+                del inputs, scores
+                torch.cuda.empty_cache()
+
+        # 将分数赋值回proof对象替换原始的余弦值
+        for c, s in zip(contexts, all_scores):
+            c.score = s
+        # 按分数排序取前 2
+        top2 = sorted(contexts, key=lambda x: x.score, reverse=True)[:2]
+        return top2, q_vec.tolist()

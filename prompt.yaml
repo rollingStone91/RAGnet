@@ -11,80 +11,12 @@ description: >
 system_prompt:
     role: system
     content: |
-      You are a professional Evidence-First QA Arbiter.
-      Your mission is to answer factual questions with maximum precision for public knowledge verification tasks. **Think step by step.**
-      You must follow all rules below regardless of domain.
-
-      ---
-      ## Step 0(preparation) – Domain Identification
-      Before reasoning, classify the question into one of the following domains:
-      - **General** – Wikipedia-like factual or historical.
-      - **Academic** – Research paper style, e.g., arXiv, physics, CS, math.
-      - **Legal** – Law, statutes, case law, LegalBench style.
-      - **Biomedical** – Clinical or life sciences research, PubMed style.
-
-      If uncertain, choose the domain whose rules will best ensure factual precision.
-      ---
-      ## Core Professional Principles (all domains)
-      1. **Rewrite the question** in your own words to clarify the key entities, time ranges, geographic scope, and topic.
-      2. **Construct a mental timeline or geographic scope** relevant to the question.
-      3. **Individually evaluate each provided context** for relevance to the clarified question.
-      4. If a context is irrelevant, **discard it completely** and do not use it in reasoning or the answer.
-      5. Use statements from relevant contexts to support your answer — never guess or invent.
-      6. If there is no supporting evidence, answer exactly: "I don’t know.",But you can use the knowledge that you already knew before.
-      7. If there is conflicting evidence, prefer the most explicit, direct, recent, and specific source.
-      8. Even if 20 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
-      9. The earlier a context appears, the higher its similarity to the question — but still verify relevance before use.
-      ---
-      ## Domain-specific reasoning rules:
-
-      ### 1. General factual / Wikipedia-like
-      - Prioritize chronological and geographic precision.
-      - For historical events, validate dates, places, and named entities directly from context.
-
-      ### 2. Academic / Research (e.g., arXiv)
-      1. Identify the research field, methodology, and key findings.
-      2. Preserve formal definitions, equations, and exact terminology.
-      3. Distinguish between experimental results, theoretical predictions, and speculation.
-      4. Prefer peer-reviewed, cited, and clearly supported statements over informal claims.//
-
-      ### 3. Legal / Case Law (e.g., LegalBench)
-      1. Identify jurisdiction, applicable laws, and relevant time frame.
-      2. Distinguish **binding precedent** from **persuasive authority**.
-      3. Quote statutory or case law language exactly where relevant.
-      4. If the question is about applicability, clearly state the controlling law and its source.
-      5. If multiple jurisdictions are mentioned, clearly state which one applies.
-
-      ### 4. Biomedical / Clinical Research (e.g., PubMed)
-      1. Identify the clinical question type (mechanism, diagnosis, treatment, prognosis, etc.).
-      2. Extract key PICO elements: Population, Intervention, Comparator, Outcome.
-      3. Apply **evidence hierarchy**:  
-         - Meta-analysis/Systematic Review > Randomized Controlled Trial > Cohort Study > Case-Control > Case Report.
-      4. Report numerical results exactly (RR, OR, CI, p-values).
-      5. Do not generalize from animal studies to humans unless explicitly stated in the context.
-      6. For conflicting results, state the balance of evidence and level of certainty.
-      ---
-      ## Special reasoning requirement:
-      - Before your final answer, show your reasoning enclosed in <think> ... </think>.
-      - Your reasoning must:
-        1. Rewrite the question.
-        2. Determine time/space scope.
-        3. Identify domain type.
-        4. Apply relevant domain-specific rules.
-        5. Filter contexts, listing which are used and why, and which are discarded.
-        6. Construct the final answer based only on retained contexts.
-
-        **Final Answer Restriction:**  
-      The final answer must **not** include or reference any provided context text directly — only present the conclusion based on the retained evidence.
-      Keep the answer as short and direct as possible — answer only what is asked, without adding extra information, explanations, or commentary.
-
-      Formatting rules:
-      - Show your reasoning inside <think> ... </think> before giving the final answer.
-      - Always indicate in <think> which contexts were used and why, and which were discarded.
-      - Always produce a single, direct answer, not a summary.
-      - Do NOT include quotes from contexts in "answer". 
-      - Do NOT produce any summary of all contexts.
-      - Do NOT print chain-of-thought; keep reasoning internal.
+        You are a general expert in various fields, capable of answering questions based on provided contexts.
+        Your task is to answer the questions with help of the given contexts and metadata. 
+        If the question requires reasoning, you should think step by step and show your reasoning steps explicitly within <think>...</think> tags before giving the final answer.
+        If there is no supporting evidence in contexts to support your answer, use the knowledge that you already knew before.
+        Your answer must be as concise as possible, never return a generic summary.
+        Output the final answer in the format: "Answer: <your answer>".
 
 # ==============================
 #  User Prompt Templates
@@ -109,15 +41,15 @@ fewshots:
     examples:
       content: |
         ### Example (HotPotQA)
-        Question: Which two actors starred in both 'Ocean's Eleven' and 'Ocean's Twelve'?
-        Contexts: 
+        Question: "Which two actors starred in both 'Ocean's Eleven' and 'Ocean's Twelve'?"
+        Contexts:
         [Context 1] George Clooney starred in 'Ocean's Eleven' and 'Ocean's Twelve'.
         [Context 2] Brad Pitt starred in 'Ocean's Eleven' and 'Ocean's Twelve'.
         <think>
-          Step 1 - Identify relevant contexts: Context 1 and Context 2 mention actors in both movies.
-          Step 2 - Connect facts: George Clooney and Brad Pitt appear in both.
+        Step 1 - Identify relevant contexts: Context 1 and Context 2 mention actors in both movies.
+        Step 2 - Connect facts: George Clooney and Brad Pitt appear in both.
         </think>
-        Answer: George Clooney and Brad Pitt
+        Answer: <George Clooney and Brad Pitt>
     instruction:
       template: |
         [Task Instruction: HotPotQA]
@@ -130,15 +62,17 @@ fewshots:
     description: Few-shot examples for SQuAD benchmark
     examples:
       content: |
-        ### Example (SQuAD)
-        Question: What is the capital of France?
+        ### Example_1
+        Question: "When was the Eiffel Tower completed?"
         Contexts:
-        [Context 1] France's capital city is Paris.
-        <think>
-        Step 1 - Rephrase: Find the capital city of France.
-        Step 2 - Context check: Context 1 provides direct answer.
-        </think>
-        Answer: Paris       
+        [Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.
+        Answer: <1889>
+
+        ### Example_2
+        Question: "Who wrote '1984'?"
+        Contexts:
+        [Context 1] George Orwell authored the novel '1984'.
+        Answer: <George Orwell>              
     instruction:
       template: |
         [Task Instruction: SQuAD]
@@ -150,16 +84,17 @@ fewshots:
     description: Few-shot examples for natural questions benchmark
     examples:
       content: |
-        ### Example (NaturalQuestions)
-        Question: When was the Eiffel Tower completed?
+        ### Example_1
+        Question: "When was the Eiffel Tower completed?"
         Contexts:
         [Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.
-        <think>
-        Step 1 - Rephrase: Determine the year Eiffel Tower construction was finished.
-        Step 2 - Timeline: Construction period 1887-1889.
-        Step 3 - Context check: Context 1 confirms the completion year.
-        </think>
-        Answer: 1889
+        Answer: <1889>
+
+        ### Example_2
+        Question: "Who wrote '1984'?"
+        Contexts:
+        [Context 1] George Orwell authored the novel '1984'.
+        Answer: <George Orwell>
     instruction:
       template: |
         [Task Instruction: Natural Questions]
@@ -171,15 +106,17 @@ fewshots:
     description: Few-shot examples for web questions benchmark
     examples:
       content: |
-        ### Example (WebQuestions)
-        Question: Who wrote '1984'?
+        ### Example_1
+        Question: "When was the Eiffel Tower completed?"
+        Contexts:
+        [Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.
+        Answer: <1889>
+
+        ### Example_2
+        Question: "Who wrote '1984'?"
         Contexts:
         [Context 1] George Orwell authored the novel '1984'.
-        <think>
-        Step 1 - Rephrase: Identify the author of '1984'.
-        Step 2 - Context check: Context 1 confirms George Orwell.
-        </think>
-        Answer: George Orwell
+        Answer: <George Orwell>
     instruction:
       template: |
         [Task Instruction: WebQuestions]
@@ -193,22 +130,22 @@ fewshots:
     examples:
       content: |
         ### Example (MMLU)
-        Question: What is the derivative of sin(x)?
-        Choices: 1) cos(x) 2) sin(x) 3) -cos(x) 4) -sin(x)
+        Question: "What is the derivative of sin(x)?"
+        Options: 0) cos(x) 1) sin(x) 2) -cos(x) 3) -sin(x)
+        [Context 1] calculus rule: d/dx[sin(x)] = cos(x).
+        [Context 2] definition of derivative: the derivative of a function at a point is the slope of the tangent line to the function at that point.
         <think>
-        Step 1 - Rephrase: Determine derivative of sin(x).
-        Step 2 - Apply calculus rule: d/dx[sin(x)] = cos(x).
-        Step 3 - Check options: Option A matches result.
+        Step 1 - Apply calculus rule: d/dx[sin(x)] = cos(x).
+        Step 2 - Check options: Option 1 matches result.
         </think>
-        Answer: 1
+        Answer: <0>      
     instruction:
       template: |
         [Task Instruction: MMLU]
         - This dataset contains multiple-choice questions across many academic fields.
         - Show reasoning, then select the best option explicitly as the final answer.
-        - You must choose the correct answer from the options 1, 2, 3, or 4.
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.\
-        - Do not explain your answer or include any additional text. Just reply with: 1, 2, 3, or 4
+        - Do not explain your answer or include any additional text. Just reply with: 0, 1, 2, or 3.
         Choices:
         {options}
         Which one is correct?
@@ -218,13 +155,16 @@ fewshots:
     examples:
       content: |
         ### Example (StrategyQA)
-        Question: Can a human survive in outer space without a suit?
+        Question: "Can a human survive in outer space without a suit?"
+        Contexts:
+        [Context 1] Humans need oxygen to breathe and survive.
+        [Context 2] outer space is a vacuum with extreme temperatures.
         <think>
-        Step 1 - Rephrase: Assess survival of human in space without protection.
-        Step 2 - Apply physical knowledge: Vacuum, temperature extremes, no oxygen.
+        Step 1 - Context 1 metioned humans need oxygen.
+        Step 2 - Context 2 indicated outer space is a vacuum without breathable air.
         Step 3 - Conclusion: Survival is impossible.
         </think>
-        Answer: False       
+        Answer: <False>      
     instruction:
       template: |
         [Task Instruction: StrategyQA]
@@ -237,15 +177,17 @@ fewshots:
     description: Few-shot examples for trivia_qa benchmark
     examples:
       content: |
-        ### Example (TriviaQA)
-        Question: Who painted the Mona Lisa?
+        ### Example_1
+        Question: "When was the Eiffel Tower completed?"
         Contexts:
-        [Context 1] Leonardo da Vinci, famous Renaissance artist, painted the Mona Lisa.
-        <think>
-        Step 1 - Rephrase: Identify the painter of the Mona Lisa.
-        Step 2 - Context check: Context 1 explicitly mentions Leonardo da Vinci.
-        </think>
-        Answer: Leonardo da Vinci             
+        [Context 1] Construction of the Eiffel Tower started in 1887 and finished in 1889.
+        Answer: <1889>
+
+        ### Example_2
+        Question: "Who wrote '1984'?"
+        Contexts:
+        [Context 1] George Orwell authored the novel '1984'.
+        Answer: <George Orwell>             
     instruction:
       template: |
         [Task Instruction: TriviaQA]

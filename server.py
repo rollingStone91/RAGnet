@@ -12,7 +12,7 @@ import requests
 import yaml
 
 # ====== 日志配置 ======
-log_filename = f"./logs_api/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_filename = f"./logs_4b_instruct/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.INFO,  # DEBUG 级别会记录更多细节
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -32,14 +32,19 @@ class Server:
     2) 验证数据完整性（通过 Proof 信息）
     3) 调用 Ollama 部署的 Qwen3:4B 模型生成答案
     """
-    def __init__(self, model_name: str = "qwen3:8b"):
+    def __init__(self, model_name: str = "hopephoto/Qwen3-4B-Instruct-2507_q8:latest"):
         self.model_name = model_name
         self.api_url = API_URL
         self.api_key = API_KEY
         if model_name.startswith("qwen3-max") or model_name == "qwen3-max":
             self.llm = None
         else:
-            self.llm = ChatOllama(model=model_name)
+            self.llm = ChatOllama(model=model_name,
+                                  reasoning=True,
+                                  temperature=0.7,
+                                  top_p=0.8,
+                                  top_k=20,
+                                  num_predict=16384)
 
     def _retrieve_from_clients(self, clients, query: str, top_k: int):
         proofs = []
@@ -87,7 +92,7 @@ class Server:
         # print(f"cleaned answer: {cleaned}")
 
         # 从 LLM 回复中提取 'Final Answer' 后的内容
-        match = re.search(r"Answer[:\s]*(.*)", cleaned, flags=re.IGNORECASE) 
+        match = re.search(r"Answer\s*:\s*<([^>]+)>", cleaned, flags=re.IGNORECASE) 
         if match:
             return match.group(1).strip()
         return cleaned.strip()
@@ -148,7 +153,7 @@ class Server:
         all_proofs.sort(key=lambda p: getattr(p, 'score', 0), reverse=True)
 
         # 取 Top-K
-        selected = all_proofs[:top_k]
+        selected = all_proofs[:2]
         # 请求对应client提供真实上下文
         contexts = [r.document.page_content for r in selected]
         metadatas = [r.document.metadata for r in selected]
