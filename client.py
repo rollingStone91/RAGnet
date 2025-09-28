@@ -30,7 +30,7 @@ class Client:
     """
     轻量级rag客户端，负责数据集加载、向量存储构建与检索。
     """
-    def __init__(self, embedding, reranker, vectorstore_path: str = "faiss_db", min_len = 50): # dashscope_api_key: str,使用api调用embedding模型
+    def __init__(self, embedding, reranker=None, vectorstore_path: str = "faiss_db", min_len = 50): # dashscope_api_key: str,使用api调用embedding模型
         os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
         self.vectorstore_path = vectorstore_path
         self.embeddings = embedding

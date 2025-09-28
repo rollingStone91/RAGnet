@@ -89,12 +89,17 @@ class Server:
         logging.info(f"未处理过的模型生成答案: {raw}")
         # cleaned = raw
         cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", raw, flags=re.DOTALL)
         # print(f"cleaned answer: {cleaned}")
 
         # 从 LLM 回复中提取 'Final Answer' 后的内容
         match = re.search(r"Answer\s*:\s*<([^>]+)>", cleaned, flags=re.IGNORECASE) 
         if match:
             return match.group(1).strip()
+        # 如果没有尖括号，就返回 Answer: 后的普通文本
+        match2 = re.search(r"Answer\s*:\s*(.*)", cleaned, flags=re.IGNORECASE)
+        if match2:
+            return match2.group(1).strip()
         return cleaned.strip()
     
     def generate_answer(self, background:str, query: str, contexts: List[str], metadatas) -> str:

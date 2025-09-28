@@ -11,7 +11,7 @@ class QwenEmbedding(Embeddings):
     """
     自定义维度的Embedding包装类，支持截取前N维
     """
-    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=4):
+    def __init__(self, model_name="./models/qwen3-embedding-0.6b", device="cuda", batch_size=4, output_dim=None):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.model = SentenceTransformer(
                                 model_name,
@@ -23,6 +23,7 @@ class QwenEmbedding(Embeddings):
                                 tokenizer_kwargs={"padding_side": "left"},
                                 trust_remote_code=True)
         self.batch_size = batch_size
+        self.output_dim = output_dim
         
         # 关闭梯度，设置 eval，并把模型切换为半精度（如果在 CPU 上，半精度不会带来好处）
         self.model.eval()
@@ -36,6 +37,12 @@ class QwenEmbedding(Embeddings):
         # 进一步确保不计算梯度
         for p in self.model.parameters():
             p.requires_grad = False
+    
+    def _truncate(self, embeddings):
+        if self.output_dim is not None:
+            return embeddings[:, :self.output_dim] if embeddings.ndim > 1 else embeddings[:self.output_dim]
+        return embeddings
+    
 
     def embed_documents(self, texts):
         """
@@ -52,7 +59,8 @@ class QwenEmbedding(Embeddings):
                     normalize_embeddings=True,
                     show_progress_bar=False
                 )
-        return embeddings.astype(np.float32, copy=False)
+        embeddings = embeddings.astype(np.float32, copy=False)
+        return self._truncate(embeddings)
 
     def embed_query(self, text):
         """encode 单个文本"""
@@ -68,7 +76,8 @@ class QwenEmbedding(Embeddings):
                     show_progress_bar=False,
                     prompt_name="query"
                 )
-        return embedding.astype(np.float32, copy=False)
+        embeddings = embeddings.astype(np.float32, copy=False)
+        return self._truncate(embeddings)
     
     # class QwenEmbeddings(Embeddings):
     # """
@@ -119,15 +128,3 @@ class QwenEmbedding(Embeddings):
     #     outputs = self.model.embed([text])
     #     embedding = outputs[0].outputs.embedding
     #     return np.array(embedding, dtype=np.float32)
-
-    # def embed_documents(self, texts: List[str]) -> List[List[float]]:
-    #     embeddings = self.embeddings.embed_documents(texts)
-    #     if self.dim is not None:
-    #         embeddings = [emb[:self.dim] for emb in embeddings]
-    #     return embeddings
-    
-    # def embed_query(self, text: str) -> List[float]:
-    #     embedding = self.embeddings.embed_query(text)
-    #     if self.dim is not None:
-    #         embedding = embedding[:self.dim]
-    #     return embedding
