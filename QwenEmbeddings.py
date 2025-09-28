@@ -76,8 +76,8 @@ class QwenEmbedding(Embeddings):
                     show_progress_bar=False,
                     prompt_name="query"
                 )
-        embeddings = embeddings.astype(np.float32, copy=False)
-        return self._truncate(embeddings)
+        embedding = embedding.astype(np.float32, copy=False)
+        return self._truncate(embedding)
     
     # class QwenEmbeddings(Embeddings):
     # """
