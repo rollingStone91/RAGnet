@@ -26,8 +26,8 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
 
         # 调用 LLM Server
         retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate(background, question, clients, top_k)
-
         logging.info(f"模型生成的答案: {answer}")
+        
         # 计算自定义 P/R/F1  
         precision, recall, f1_score = validation_tools.compute_score(answer, gold_answers)
 
@@ -52,7 +52,7 @@ def evaluate_datasets(clients: list[Client], server: Server, top_k=5, samples=[]
     print(f"Saved Natural Questions results to {output_csv}")
 
 def datasets_costs(clients: list[Client], server, top_k=5, samples=[],
-                                output_csv: str = "trivia_qa_costs.csv"): 
+                                output_csv: str = "trivia_qa_costs.csv", dataset_name:str = "trivia_qa"): 
     """
     clients: 创建的多个client
     server: 用于生成的server
@@ -63,15 +63,14 @@ def datasets_costs(clients: list[Client], server, top_k=5, samples=[],
     """
     costs = []
     for idx, sample in enumerate(samples):
-        question = sample["question"]
-        background = f"Generate exactly 3 distinct answers that can all be verified from the document and\
-the answers MUST be directly found or clearly derivable from the provided document content.\n Context: {sample['context']}"
-        
-        print(f"Processing question: {question}")
-        print(f"Background: {sample['context']}")
-        print(f"Gold_Answer: {sample['answer']}")
+        background, question, gold_answers = validation_tools.get_question_answer(dataset_name, sample)
+
+        logging.info(f"正在处理的问题:{question}")
+        logging.info(f"标准答案: {gold_answers}")
+
         # 调用 LLM Server
         cost, answer = server.multi_client_generate(background, question, clients, top_k)
+        logging.info(f"模型生成的答案: {answer}")
 
         costs.append({
             "idx": idx,

@@ -133,12 +133,12 @@ class Server:
                 print(f"Qwen3-max API调用失败: {e}")
                 raw = ""
             answer = self.clean_answer(raw)
-            print(f"answer:{answer}")
+            # print(f"answer:{answer}")
             return answer
         else:
             response = self.llm.invoke(prompt)
             answer = self.clean_answer(response.content)
-            print(f"answer:{answer}")
+            # print(f"answer:{answer}")
             return answer
     
     def multi_client_generate(self, background:dict, query:str, clients: List[Client], top_k=5):
