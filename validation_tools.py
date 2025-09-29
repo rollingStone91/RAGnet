@@ -291,6 +291,28 @@ def get_strategyqa(sample):
     # print(f"Gold answer: {gold_answer}")
     return background, question, str(gold_answer)
 
+def get_single_humanqa(sample):
+    # 拼接 question + description
+    question = sample.get("question", "").strip()
+    background = {}
+    template = config["fewshots"]["single_domain_human_qa"]["instruction"]["template"]
+    background["Instruction"] = template
+    background["fewshot"] = config["fewshots"]["single_domain_human_qa"]["examples"]["content"]
+
+    gold_answer = sample["answer"]
+    return background, question, gold_answer
+
+def get_cross_humanqa(sample):
+    # 拼接 question + description
+    question = sample.get("question", "").strip()
+    background = {}
+    template = config["fewshots"]["cross_domain_human_qa"]["instruction"]["template"]
+    background["Instruction"] = template
+    background["fewshot"] = config["fewshots"]["cross_domain_human_qa"]["examples"]["content"]
+
+    gold_answer = sample["answer"]
+    return background, question, gold_answer
+
 def exact_match(ans: str, gold_ans: List[str]) -> bool:
     ans_norm = normalize_answer(ans)
     return any(normalize_answer(g) in ans_norm for g in gold_ans)
