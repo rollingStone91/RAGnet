@@ -299,7 +299,7 @@ def get_single_humanqa(sample):
     background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["single_domain_human_qa"]["examples"]["content"]
 
-    gold_answer = sample["answer"]
+    gold_answer = sample["answers"]
     return background, question, gold_answer
 
 def get_cross_humanqa(sample):
@@ -311,7 +311,7 @@ def get_cross_humanqa(sample):
     background["fewshot"] = config["fewshots"]["cross_domain_human_qa"]["examples"]["content"]
 
     gold_answer = sample["answer"]
-    return background, question, gold_answer
+    return background, question, str(gold_answer)
 
 def exact_match(ans: str, gold_ans: List[str]) -> bool:
     ans_norm = normalize_answer(ans)
@@ -327,10 +327,25 @@ def semantic_match(ans: str, gold_ans: List[str], threshold: float = 0.85) -> bo
             return True
     return False
 
-def compute_hit(answer:str, gold_answer:List[str], context:str, contexts:List[str], threshold: float = 0.85):
-    em = exact_match(answer, gold_answer)
+def compute_hit(answer:str, gold_answer:List[str], retrival:str, contexts:List[str], threshold: float = 0.85):
+    em = 0
+    if exact_match(answer, gold_answer):
+        em = 1
     
-    hit = exact_match(context, contexts)
-    if not hit:
-        hit = semantic_match(context, contexts, threshold)
+    hit = 0
+    if len(contexts) > 1:
+        for c in retrival:
+            if exact_match(c, contexts):
+                hit += 1
+            elif semantic_match(c, contexts, threshold):
+                hit += 1
+        hit = hit / len(retrival) if len(retrival) > 0 else 0
+    else:
+        for c in retrival:
+            if exact_match(c, contexts):
+                hit = 1
+                break
+            elif semantic_match(c, contexts, threshold):
+                hit = 1
+                break
     return hit, em

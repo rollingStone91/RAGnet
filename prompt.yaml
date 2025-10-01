@@ -11,8 +11,8 @@ description: >
 system_prompt:
     role: system
     content: |
-        You are a general expert in various fields, capable of answering questions based on provided contexts.
-        Your task is to answer the questions with help of the given contexts and metadata. 
+        You are an expert in fields of Computer Science, Law and Medicine, capable of answering questions based on provided contexts.
+        Your task is to answer the questions with help of the given contexts. 
         If the question requires reasoning, you should think step by step and show your reasoning steps explicitly within <think>...</think> tags before giving the final answer.
         If there is no supporting evidence in contexts to support your answer, use the knowledge that you already knew before.
         Your answer must be as concise as possible, never return a generic summary.
@@ -199,41 +199,47 @@ fewshots:
     description: Few-shot examples for single domain human_qa
     examples:
       content: |
-        ### Example_1
-        Question: "What did the 2016 PCA tribunal rule about China's 'nine-dash line' claim?"
-        Contexts:
-        [Context 1] The tribunal also ruled that China has 'no historical rights' based on the 'nine-dash line' map.
-        Answer: <No rights>
+        ### Example_Computer Science
+        Question: What is the big-O of binary search?
+        Context: Binary search halves the search space each step.
+        Answer: <O(log n)>
 
-        ### Example_2
-        Question: "What laws support the Philippines' EEZ claim in the South China Sea?"
-        Contexts:
-        [Context 1] The administrative order asserts the Philippine claim over its EEZ in the South China Sea which conveys the Philippine government's position that it has sovereign rights under the 1982 United Nations Convention on the Law of the Sea over the West Philippine Sea area and 'inherent power and right to designate its maritime areas with appropriate nomenclature for purposes of the national mapping system'.
-        Answer: <National law>             
+        ### Example_Law
+        Question: Who brings a criminal case?
+        Context: Prosecutors act in the name of the State, not the victim.
+        Answer: <The State>
+
+        ### Example_Medicine
+        Question: What lowers blood K⁺ fastest?
+        Context: Insulin drives K⁺ into cells within minutes.
+        Answer: <Insulin>          
     instruction:
       template: |
         [Task Instruction: single domain HumanQA]
         - Answer should be concise and entity-focused.
-        - Generate exactly 3 distinct answers that can all be verified from the document and the answers MUST be directly found or clearly derivable from the provided document content.
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
   
   cross_domain_human_qa:
     description: Few-shot examples for cross domain human_qa
     examples:
       content: |
-        ### Example_1
-        Question: "Can the medical study's findings on the safety of continuing clopidogrel preoperatively be used to argue against a company's request for a video interview, by suggesting that if a medication with potential bleeding risks can be safely continued, then a customer with a good track record should not be subjected to an intrusive privacy measure?"
-        Contexts:
-        [Context 1] Endpoints included postoperative bleeding requiring reoperation, as well as the incidence and volume of blood transfusion. Statistical analysis was performed using analysis of variance, Fisher exact, χ(2), and Wilcoxon rank-sum tests. RESULTS:Over the study interval, a total of 10,406 patients underwent surgery, including 5264 CEA, 2883 LEB, 1125 EVAR, and 1134 oAAA repair. Antiplatelet use among all patients varied, with 19% (n = 2010) taking no antiplatelet agents, 69% (n = 7132) taking aspirin (ASA) alone, 2.2% (n = 229) taking clopidogrel alone, and 9.7% (n = 1017) taking both ASA and clopidogrel. Clopidogrel alone or as dual antiplatelet therapy was most frequently used prior to CEA and least frequently prior to oAAA group (CEA 16.1%, LEB 9.0%, EVAR 6.5%, oAAA 5%). Reoperation for bleeding was not significantly different among patients based on antiplatelet regimen (none 1.5%, ASA 1.3%, clopidogrel 0.9%, ASA/clopidogrel 1.5%, P = .74). When analyzed by operation type, no difference in reoperation for bleeding was seen across antiplatelet regimens. There was also no difference in the incidence of transfusion among antiplatelet treatment groups (none 18%, ASA 17%, clopidogrel 0%, ASA/clopidogrel 24%, P = .1) and none when analyzed by individual operation type. Among patients who did require transfusion, there was no significant difference in the mean number of units of packed red blood cells required (none 0.7 units, ASA 0.5 units, clopidogrel 0 units, ASA/clopidogrel 0.6 units, P = .1) or when stratified by operation type. Long Answer:Patients undergoing peripheral arterial surgery in whom clopidogrel was continued either alone or as part of dual antiplatelet therapy did not have significant bleeding complications compared with patients taking no antiplatelet therapy or ASA alone at the time of surgery. These data suggest that clopidogrel can safely be continued preoperatively in patients with appropriate indications for its use, such as symptomatic carotid disease or recent drug-eluting coronary stents. So the answer is no.
-        [Context 2] Hello, The company I am having issues with are holding my account that I have them under certain restrictions (one of which is quite serious, money related) due to a claim of theirs to which I do not agree. They want to video interview me over the internet. Not sure why they wanted to do that but there is no such thing explicitly written in their ToS. I find this rather intrusive regarding my privacy, not to mention unprofessional and quite barbaric. And no, there have been no reports of any sort of fraudulent activity on my account that I know of, my track of record is excellent there, and they have already verified my account about 8 years ago. The company is based in California, USA, I am based in the EU, Romania. Are there any USA / EU / international laws protecting my privacy over the internet that I could enforce upon them ? Do I stand a fair chance of winning such a lawsuit ? Thank you
-        Answer: <No>           
+        ### Example
+        Question: Can GPL code be legally embedded in proprietary medical-device firmware?
+        Context:
+        [Context1] GPL requires full source release of derivative works.
+        [Context2] FDA-class devices often keep firmware closed for safety audits.
+        <think>
+        Step 1: Embedding creates GPL-covered derivative → must publish source.
+        Step 2: FDA process usually forbids public disclosure of safety-critical code.
+        Step 3: Obligations conflict → impossible to comply with both → “No”.
+        </think>
+        Answer: <No>          
     instruction:
       template: |
         [Task Instruction: cross domain HumanQA]
-        - These are Yes/No questions.
-        - Generate exactly 3 distinct answers that can all be verified from the document and the answers MUST be directly found or clearly derivable from the provided document content.
+        - These are questions that require reasoning.
         - Even if 10 or more contexts are given, you must still return a **direct answer to the question**, never a generic summary.
-        - Do not provide any explanation or extra words. Only reply with: Yes or No.
+        - Do not provide any explanation or extra words. Final answer must be exactly "Yes" or "No".
 
   general:
     description: General Few-shot

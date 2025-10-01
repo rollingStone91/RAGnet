@@ -99,15 +99,16 @@ def evaluate_hit_rate(clients: list[Client], server: Server, top_k=5, samples=[]
     hit_rates = []
     for idx, sample in enumerate(samples):
         background, question, gold_answers = validation_tools.get_single_humanqa(sample)
-        context = sample['context']
+        contexts = sample['context']
         
         logging.info(f"正在处理的问题:{question}")
         logging.info(f"标准答案: {gold_answers}")
 
         # 调用 LLM Server
-        retrieve_latency, generate_latency, contexts, answer = server.multi_client_generate(background, question, clients, top_k)
-
-        hit, exact_match = validation_tools.compute_hit(answer, gold_answers, context, contexts, similarity_threshold)
+        retrieve_latency, generate_latency, retrival, answer = server.multi_client_generate(background, question, clients, top_k)
+        logging.info(f"模型生成的答案: {answer}")
+        
+        hit, exact_match = validation_tools.compute_hit(answer, gold_answers, retrival, contexts, similarity_threshold)
 
         hit_rates.append({
             "idx": idx,
@@ -115,7 +116,11 @@ def evaluate_hit_rate(clients: list[Client], server: Server, top_k=5, samples=[]
             "hit": hit,
             "exact_match": exact_match,
             "retrieve_latency": retrieve_latency,
-            "generate_latency": generate_latency
+            "generate_latency": generate_latency,
+            "gold_answers": gold_answers,
+            "answer": answer,
+            "retrival": retrival,
+            "contexts": contexts,
         })
 
         if idx % 10 == 0:

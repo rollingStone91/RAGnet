@@ -12,7 +12,7 @@ import requests
 import yaml
 
 # ====== 日志配置 ======
-log_filename = f"./logs_4b_instruct/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+log_filename = f"./logs_humanqa/process_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.INFO,  # DEBUG 级别会记录更多细节
     format="%(asctime)s - %(levelname)s - %(message)s",
