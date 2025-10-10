@@ -25,7 +25,7 @@
 ### 1. 启动服务
 
 ```bash
-go run main.go
+go run .
 ```
 
 服务将在 `http://localhost:8080` 启动。

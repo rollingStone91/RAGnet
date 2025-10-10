@@ -3,7 +3,6 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"gnarktest/model"
 	"gnarktest/pkg"
@@ -22,7 +21,6 @@ func GenPederSonAndMerkleHandler() func(c *gin.Context) {
 		}
 
 		merkleProof, index, root, cost2, err := pkg.GenMerkleProof(req.ClientId, req.Data)
-		fmt.Println(req.Data)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 402, "msg": err.Error()})
 			return

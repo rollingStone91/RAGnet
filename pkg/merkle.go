@@ -1,7 +1,6 @@
 package pkg
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +10,7 @@ import (
 	"gnarktest/model"
 	"gnarktest/utils"
 	"hash"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +21,10 @@ var (
 	treeMap    = make(map[string]*merkletree.MerkleTree)
 	StringsMap = make(map[string][]string)
 )
+
+type Document struct {
+	PageContent string `json:"page_content"`
+}
 
 func GetFileNames() ([]string, error) {
 	var fileNames []string
@@ -34,7 +38,7 @@ func GetFileNames() ([]string, error) {
 	// 遍历目录项
 	for _, entry := range entries {
 		if !entry.IsDir() { // 只处理文件，忽略子目录
-			nameWithoutExt := strings.TrimSuffix(entry.Name(), ".jsonl")
+			nameWithoutExt := strings.TrimSuffix(entry.Name(), ".json")
 			fileNames = append(fileNames, nameWithoutExt)
 		}
 	}
@@ -48,36 +52,29 @@ func InitMerkleTrees() error {
 		return err
 	}
 	for _, name := range names {
-		list := make([]string, 0)
-		// 1. 打开JSONL文件
-		file, err := os.Open(filepath.Join(filepath.Join(config.BasePath, config.MerklePath), name+".jsonl"))
+		data, err := ioutil.ReadFile(filepath.Join(filepath.Join(config.BasePath, config.MerklePath), name+".json"))
 		if err != nil {
-			panic(err)
+			panic("读取文件失败:")
 		}
-		defer file.Close()
-
-		// 2. 创建扫描器逐行读取
-		scanner := bufio.NewScanner(file)
-		lineNum := 0
-
-		for scanner.Scan() {
-			lineNum++
-			line := scanner.Bytes() // 获取当前行的字节切片
-
-			// 3. 解析JSON到结构体
-			var p model.Obj
-			if err := json.Unmarshal(line, &p); err != nil {
-				fmt.Printf("解析第 %d 行失败: %v\n", lineNum, err)
-				continue
-			}
-			list = append(list, p.PageContent)
+		// 解析JSON数据
+		var documents map[string]Document
+		err = json.Unmarshal(data, &documents)
+		if err != nil {
+			panic("解析JSON失败:")
 		}
-		tree, err := InitTreeFromList(list)
+		// 创建字符串切片来存储所有的page_content
+		var pageContents []string
+		// 遍历所有的文档，提取page_content
+		for _, doc := range documents {
+			pageContents = append(pageContents, doc.PageContent)
+		}
+
+		tree, err := InitTreeFromList(pageContents)
 		if err != nil {
 			return err
 		}
 		treeMap[name] = tree
-		StringsMap[name] = list
+		StringsMap[name] = pageContents
 	}
 	return nil
 }
@@ -191,3 +188,44 @@ func ReadDataSetFromFile(path string) ([]string, error) {
 	}
 	return list, nil
 }
+
+/*// Handler调用，要确保client_id与文件名（不加后缀）相同
+func InitMerkleTrees() error {
+	names, err := GetFileNames()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		list := make([]string, 0)
+		// 1. 打开JSONL文件
+		file, err := os.Open(filepath.Join(filepath.Join(config.BasePath, config.MerklePath), name+".jsonl"))
+		if err != nil {
+			panic(err)
+		}
+		defer file.Close()
+
+		// 2. 创建扫描器逐行读取
+		scanner := bufio.NewScanner(file)
+		lineNum := 0
+
+		for scanner.Scan() {
+			lineNum++
+			line := scanner.Bytes() // 获取当前行的字节切片
+
+			// 3. 解析JSON到结构体
+			var p model.Obj
+			if err := json.Unmarshal(line, &p); err != nil {
+				fmt.Printf("解析第 %d 行失败: %v\n", lineNum, err)
+				continue
+			}
+			list = append(list, p.PageContent)
+		}
+		tree, err := InitTreeFromList(list)
+		if err != nil {
+			return err
+		}
+		treeMap[name] = tree
+		StringsMap[name] = list
+	}
+	return nil
+}*/
