@@ -98,28 +98,31 @@ def evaluate_hit_rate(clients: list[Client], server: Server, top_k=5, samples=[]
                       output_csv: str = "semi_professional_baseline_topk_5.csv"):
     hit_rates = []
     for idx, sample in enumerate(samples):
-        background, question, gold_answers = validation_tools.get_single_humanqa(sample)
+        # 处理cross_domain的humanqa数据集/single_domain的humanqa数据集
+        background, question, gold_answers = validation_tools.get_cross_humanqa(sample)
         contexts = sample['context']
+        if isinstance(contexts, str):
+            contexts = [contexts]
         
         logging.info(f"正在处理的问题:{question}")
         logging.info(f"标准答案: {gold_answers}")
 
         # 调用 LLM Server
-        retrieve_latency, generate_latency, retrival, answer = server.multi_client_generate(background, question, clients, top_k)
+        retrieve_latency, generate_latency, retrieval, answer = server.multi_client_generate(background, question, clients, top_k)
         logging.info(f"模型生成的答案: {answer}")
         
-        hit, exact_match = validation_tools.compute_hit(answer, gold_answers, retrival, contexts, similarity_threshold)
+        hit, exact_match = validation_tools.compute_hit(answer, gold_answers, retrieval, contexts, similarity_threshold)
 
         hit_rates.append({
             "idx": idx,
-            "category": sample['category'],
+            "category": sample.get("category", "cross_domain"),
             "hit": hit,
             "exact_match": exact_match,
             "retrieve_latency": retrieve_latency,
             "generate_latency": generate_latency,
             "gold_answers": gold_answers,
             "answer": answer,
-            "retrival": retrival,
+            "retrival": retrieval,
             "contexts": contexts,
         })
 

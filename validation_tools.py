@@ -294,12 +294,16 @@ def get_strategyqa(sample):
 def get_single_humanqa(sample):
     # 拼接 question + description
     question = sample.get("question", "").strip()
+    if question == "":
+        question = sample.get("question_en", "").strip()
     background = {}
     template = config["fewshots"]["single_domain_human_qa"]["instruction"]["template"]
     background["Instruction"] = template
     background["fewshot"] = config["fewshots"]["single_domain_human_qa"]["examples"]["content"]
 
-    gold_answer = sample["answers"]
+    gold_answer = sample.get("answer", [])
+    if gold_answer == []:
+        gold_answer = sample.get("answer_en", [])
     return background, question, gold_answer
 
 def get_cross_humanqa(sample):
@@ -317,35 +321,23 @@ def exact_match(ans: str, gold_ans: List[str]) -> bool:
     ans_norm = normalize_answer(ans)
     return any(normalize_answer(g) in ans_norm for g in gold_ans)
 
-# === 语义匹配函数（基于简单字符串相似度，实际部署可替换为向量相似度）===
+# === 语义匹配函数（基于简单字符串相似度）===
 def semantic_match(ans: str, gold_ans: List[str], threshold: float = 0.85) -> bool:
     ans_norm = normalize_answer(ans)
-    for g in gold_ans:
-        g_norm = normalize_answer(g)
-        ratio = difflib.SequenceMatcher(None, ans_norm, g_norm).ratio()
-        if ratio >= threshold:
-            return True
-    return False
+    return any(difflib.SequenceMatcher(None, ans_norm, normalize_answer(g)).ratio() >= threshold
+               for g in gold_ans)
 
-def compute_hit(answer:str, gold_answer:List[str], retrival:str, contexts:List[str], threshold: float = 0.85):
-    em = 0
-    if exact_match(answer, gold_answer):
-        em = 1
+def compute_hit(answer:str, gold_answer:List[str], retrieval:list[str], contexts, threshold: float = 0.85):
+    # 计算 EM
+    em = 1 if exact_match(answer, gold_answer) else 0
     
-    hit = 0
+    # 计算 context 命中率（以 recall 为例）
+    matched = 0
+    for c in retrieval:
+        if exact_match(c, contexts) or semantic_match(c, contexts, threshold):
+            matched += 1
     if len(contexts) > 1:
-        for c in retrival:
-            if exact_match(c, contexts):
-                hit += 1
-            elif semantic_match(c, contexts, threshold):
-                hit += 1
-        hit = hit / len(retrival) if len(retrival) > 0 else 0
-    else:
-        for c in retrival:
-            if exact_match(c, contexts):
-                hit = 1
-                break
-            elif semantic_match(c, contexts, threshold):
-                hit = 1
-                break
+        hit = matched / len(retrieval) if len(retrieval) > 0 else 0
+    elif len(contexts) == 1:
+        hit = 1 if matched > 0 else 0
     return hit, em

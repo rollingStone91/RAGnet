@@ -14,3 +14,27 @@ models/
 dataset_construct
 
 test_dataset/
+
+result_before/
+result_4b_instruct/
+result_humanqa_qwen/
+result_humanqa_llama/
+result_humanqa_newtest/
+
+evaluate_code/
+evaluate_benchmark/
+
+hit_rate_results/
+
+costs/
+
+chunks/
+
+docs/
+cont/
+
+logs_before/
+logs_4b_instruct/
+logs_humanqa/
+logs_humanqa_llama/
+logs_new_test/

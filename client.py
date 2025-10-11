@@ -338,9 +338,10 @@ class Client:
         q_vec = self.embeddings.embed_query(query)
 
         # 原生 FAISS 搜索，返回距离矩阵 D 和 索引矩阵 I
-        D, I = self.db.index.search(q_vec.reshape(1, -1), top_k) 
+        D, I = self.db.index.search(q_vec.reshape(1, -1), top_k*2)  # 多取一些以便后续rerank
 
         contexts = []
+        seen_texts = set()
         for dist, idx in zip(D[0], I[0]):
             if int(idx) < 0:
                 continue
@@ -350,6 +351,11 @@ class Client:
 
             # 从 docstore 取 Document；不同实现接口可能不同，这里使用内置 _dict 作为后备
             doc = self.db.docstore._dict[docstore_id]
+            # 获取文本内容
+            content = doc.page_content.strip()
+            if not content or content in seen_texts:
+                continue  # 跳过重复或空文本
+            seen_texts.add(content)
             # reconstruct 向量（如果索引支持）    
             vec = self.db.index.reconstruct(int(idx)).tolist()
 
